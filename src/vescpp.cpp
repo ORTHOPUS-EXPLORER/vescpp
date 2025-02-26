@@ -10,9 +10,15 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
   //spdlog::debug("[{0}/0x{0:2X}] New VESCpp instance", _id);
 }
 
+bool send(const VESC::BoardId id, const VESC::Packet* pkt)
+{
+  return true;
+}
+
 bool VESCpp::add_peer(VESC::BoardId id, VESC::HwTypeId typ)
 {
   spdlog::debug("[{0}/0x{0:2X}] Add VESC Peer {1}: {2}", _id, id, ::VESC::HW_TYPE_s(typ));
+
   return true; 
 } 
 

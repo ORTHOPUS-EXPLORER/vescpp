@@ -1,5 +1,4 @@
 #include <lyra/lyra.hpp>
-#include "spdlog/cfg/env.h"
 
 #include "vescpp/vescpp.hpp"
 #include "vescpp/comm/can.hpp"

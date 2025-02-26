@@ -53,7 +53,7 @@ public:
   using Handler = void(const Id can_id, const uint8_t data[8], const uint8_t len);
   CAN(const std::string_view& can_port, VESC::BoardId this_id);
   ~CAN() = default;
-  bool send(const Packet& pkt) override;
+  bool send(const VESC::Packet& pkt) override;
   
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scan(std::chrono::milliseconds timeout_ms = std::chrono::milliseconds(1000));
 

@@ -76,7 +76,13 @@ function(add_test_target)
   )
 endfunction(add_test_target)
 
-add_test_target(NAME packet       SRCS  lib/packet.cpp        LIBRARIES vescpp)
-add_test_target(NAME all          SRCS  all.cpp                         ALL)
+add_test_target(NAME packet       
+                SRCS  lib/packet.cpp lib/vesc_packets.cpp       
+                LIBRARIES vescpp
+               )
+add_test_target(NAME all          
+                SRCS  all.cpp                         
+                ALL
+               )
 
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} DEPENDS ${all_tests})

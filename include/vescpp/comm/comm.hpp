@@ -7,7 +7,7 @@ namespace vescpp
   class Comm
   {
     public:
-      virtual bool send(const Packet& pkt) = 0;
+      virtual bool send(const VESC::Packet& pkt) = 0;
       
   };
 }

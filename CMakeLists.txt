@@ -27,6 +27,7 @@ add_library(${PROJECT_NAME} STATIC
   src/vescpp.cpp
   src/comm/can.cpp
   src/vesc/utils.cpp
+  src/packet/vesc_packets/00_fwversion.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

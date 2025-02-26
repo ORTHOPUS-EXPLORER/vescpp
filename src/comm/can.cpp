@@ -4,7 +4,6 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include "spdlog/fmt/bin_to_hex.h"
 
 namespace vescpp::comm 
 {
@@ -61,7 +60,7 @@ void CAN::canRXcb(const can_frame& frame)
   
 }
 
-bool CAN::send(const Packet& pkt)
+bool CAN::send(const VESC::Packet& pkt)
 {
   return false;
 }
