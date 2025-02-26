@@ -53,7 +53,7 @@ public:
   using Handler = void(const Id can_id, const uint8_t data[8], const uint8_t len);
   CAN(const std::string_view& can_port, VESC::BoardId this_id);
   ~CAN() = default;
-  bool send(const VESC::Packet& pkt) override;
+  bool send(const VESC::BoardId id, VESC::Packet& pkt) override;
   
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scan(std::chrono::milliseconds timeout_ms = std::chrono::milliseconds(1000));
 
@@ -68,7 +68,32 @@ private:
   std::vector<std::pair<Id, std::function<Handler>>> _can_handlers;
 
   void pingCB(const Id can_id, const uint8_t data[8], const uint8_t len);
-  void pongCB(const Id can_id, const uint8_t data[8], const uint8_t len);
+  
+  // CAN Packets handling
+  enum class PktState
+  {
+    Idle,
+    Streaming,
+    Ready
+  };
+  typedef struct 
+  {
+    Time::time_point last_t;
+    uint16_t         index;
+    PktState         state;
+    DataBuffer       buffer;
+  } pkt_rx_t;
+  
+  std::vector<pkt_rx_t> _rx_pkts;
+
+    // Short packets (<6 bytes), immediate processing
+  void processShortBufferCB(const Id can_id, const uint8_t data[8], const uint8_t len);
+    // Medium packets (<256 bytes), requires buffering
+  void fillRXBufferCB(const Id can_id, const uint8_t data[8], const uint8_t len);
+    // Long packets    (<65536 bytes), requires buffering
+  void fillRXBufferLongCB(const Id can_id, const uint8_t data[8], const uint8_t len);
+    // Medium & Long packets, process pending buffer
+  void processRXBufferCB(const Id can_id, const uint8_t data[8], const uint8_t len);
 };
 
 }

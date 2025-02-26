@@ -9,7 +9,7 @@ class FwVersion
 {
 public:
     FwVersion(bool isreq=false);
-    bool encode_payload(DataBuffer& buf) override;
+    bool encode_payload(DataBuffer& buf, size_t start=0, size_t max_len=0) override;
     bool decode_payload(const DataBuffer& buf, size_t start=0, size_t len=0) override;
     void setupTest() override;
 
