@@ -24,6 +24,12 @@ namespace VESC
 {
 
 typedef enum {
+    HW_TYPE_VESC = 0,
+    HW_TYPE_VESC_BMS,
+    HW_TYPE_CUSTOM_MODULE
+} HW_TYPE;
+
+typedef enum {
 	COMM_FW_VERSION							= 0,
 	COMM_JUMP_TO_BOOTLOADER					= 1,
 	COMM_ERASE_NEW_APP						= 2,

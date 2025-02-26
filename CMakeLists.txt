@@ -26,6 +26,7 @@ FetchContent_MakeAvailable(
 add_library(${PROJECT_NAME} STATIC
   src/vescpp.cpp
   src/comm/can.cpp
+  src/vesc/utils.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

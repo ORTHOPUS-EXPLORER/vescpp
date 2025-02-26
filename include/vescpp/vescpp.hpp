@@ -9,8 +9,9 @@ namespace vescpp
   {
   public:
     VESCpp(VESC::BoardId this_id, Comm* comm);
+    ~VESCpp() = default;
 
-    bool add_peer(VESC::BoardId id);
+    bool add_peer(VESC::BoardId id, VESC::HwTypeId typ);
 
   private:
     const VESC::BoardId _id;

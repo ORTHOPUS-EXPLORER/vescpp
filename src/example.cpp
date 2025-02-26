@@ -20,7 +20,7 @@ int main(int argc, char**argv)
     {
         spdlog::error("Error when parsing command line: {}. Abort", result.message());
         return 1;
-    }
+    } 
 
     if(show_help)
     {
@@ -29,11 +29,11 @@ int main(int argc, char**argv)
     }
 
     auto can_comm = vescpp::comm::CAN(can_port, 179);
-    auto can_ids = can_comm.scan(std::chrono::milliseconds(5000));
+    const auto& can_ids = can_comm.scan(std::chrono::milliseconds(1000));
 
     auto vesc = vescpp::VESCpp(179, &can_comm);
-    for(const auto& id: can_ids)
-        vesc.add_peer(id);
-
-    return 0;
+    for(const auto& [id,typ]: can_ids)
+        vesc.add_peer(id,typ);
+    spdlog::debug(".");
+    return EXIT_SUCCESS; 
 }
