@@ -9,13 +9,7 @@ namespace vescpp
   class Comm
   {
     public:
-      virtual bool send(const VESC::BoardId id, VESC::Packet& pkt) = 0;
-      
-
-      bool processPacket(const VESC::BoardId id, const DataBuffer& buff, size_t start=0, size_t len=0)
-      {
-        return false;
-      }
+      virtual bool send(const VESC::BoardId src_id, const VESC::BoardId tgt_id, VESC::Packet& pkt) = 0;
 
       std::map<VESC::BoardId, VESCpp*> _vescpp;
   };

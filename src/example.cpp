@@ -27,10 +27,10 @@ int main(int argc, char**argv)
         return 0;
     }
 
-    auto can_comm = vescpp::comm::CAN(can_port, 179);
-    const auto& can_ids = can_comm.scan(std::chrono::milliseconds(100));
+    auto can_comm = vescpp::comm::CAN(can_port);
+    auto vesc = vescpp::VESCpp(51, &can_comm);
+    const auto& can_ids = can_comm.scan(vesc.id, std::chrono::milliseconds(100));
 
-    auto vesc = vescpp::VESCpp(179, &can_comm);
     for(const auto& [id,typ]: can_ids)
     {
         vesc.add_peer(id,typ);

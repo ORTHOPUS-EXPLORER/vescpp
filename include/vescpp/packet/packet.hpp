@@ -7,7 +7,7 @@ namespace vescpp::VESC
   {
     public:
       Packet(VESC::PktId id, bool isReq, size_t len_min, size_t len_max=0)
-        : _id(id)
+        : id(id)
         , _isRequest(isReq)
         , is_valid(false)
         , _payload_length(0)
@@ -18,7 +18,7 @@ namespace vescpp::VESC
 
       bool encode(DataBuffer& buf, size_t start=0, size_t max_len=0)
       {
-        buf.push_back(_id);
+        buf.push_back(id);
         _header_length = 1;
         if(!_isRequest)
           return encode_payload(buf, start, max_len);
@@ -29,9 +29,9 @@ namespace vescpp::VESC
       {
         if(!len)
           len = buf.size() - start;
-        if(len < 1 || _id != buf[0])
+        if(len < 1 || id != buf[0])
         {
-          spdlog::error("[Packet] Can't decode packet, len {}. Id {}/{}", len, _id, buf[0]);
+          spdlog::error("[Packet] Can't decode packet, len {}. Id {}/{}", len, id, buf[0]);
           return false;
         }
         return decode_payload(buf, start+1, len-1);
@@ -42,7 +42,7 @@ namespace vescpp::VESC
 
       virtual void setupTest() {}
 
-      const VESC::PktId _id;
+      const VESC::PktId id;
       bool _isRequest;
       bool is_valid;
       size_t _header_length, _payload_length;

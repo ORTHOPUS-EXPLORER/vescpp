@@ -32,7 +32,6 @@ bool FwVersion::decode_payload(const DataBuffer& buf, size_t start, size_t len)
         len = buf.size()-start;
     auto name_len = len - _payload_length_min;
     size_t idx=start;
-
     if(len < _payload_length_min)
     {
         spdlog::error("[FwVersion] Can't decode payload, not enough data: {}/{}", len, _payload_length_min);
