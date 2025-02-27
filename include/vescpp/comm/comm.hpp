@@ -5,7 +5,7 @@
 
 namespace vescpp
 {
-  class VESCpp;
+  class VESCpp; 
   class Comm
   {
     public:

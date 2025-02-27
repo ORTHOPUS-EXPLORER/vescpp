@@ -9,15 +9,20 @@ int main(int argc, char**argv)
 
     bool show_help = false;
     std::string can_port = "can0";
+    int board_id = 51;
     bool device_mode = false;
-    auto cli = lyra::help(show_help).description("VescPP example")
+    auto cli = lyra::help(show_help).description("VESCpp example")
     | lyra::opt( can_port, "port")
         ["-P"]["--port"]
-        ("CAN port to use")
+        ("CAN port")
+    | lyra::opt( board_id, "board_id")
+        ["-i"]["--board-id"]
+        ("Device ID")
     | lyra::opt( device_mode)
         ["-m"]["--device-mode"]
         ("Act as device (VESC-like)")
     ;
+    board_id &= 0xFF;
     
     if (auto result = cli.parse( { argc, argv } ); !result)
     {
@@ -30,9 +35,10 @@ int main(int argc, char**argv)
         std::cout << cli << std::endl; 
         return 0;
     }
+    spdlog::info("[{}] Start VESCpp with ID {}, device_mode: {}", can_port, board_id, device_mode);
 
     auto can_comm = vescpp::comm::CAN(can_port);
-    auto vesc = vescpp::VESCpp(51, &can_comm, device_mode);
+    auto vesc = vescpp::VESCpp(board_id, &can_comm, device_mode);
     
     if(!device_mode)
     {
@@ -40,9 +46,9 @@ int main(int argc, char**argv)
         for(const auto& [id,typ]: can_ids)
         {
             vesc.add_peer(id,typ);
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
         for(auto& [id, v]: vesc._devs)
         {
             if(!v->fw.is_valid)
@@ -51,6 +57,7 @@ int main(int argc, char**argv)
             spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, v->fw.fw_version_major, v->fw.fw_version_minor,  v->fw.hw_name.c_str(), spdlog::to_hex(v->fw.uuid));
         }
     }
+    spdlog::info("Press enter to exit");
     getchar();
     return EXIT_SUCCESS; 
 }

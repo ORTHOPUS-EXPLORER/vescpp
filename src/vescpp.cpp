@@ -13,7 +13,7 @@ bool VESCDevice::decodePacket(Comm* comm, const VESC::BoardId src_id, const Data
       //spdlog::debug("[VESC][{}] Decoding FwVersion", id);
       return _fw.decode(buff, start, len);
     default:
-      spdlog::debug("Unhandled Packet {}",pkt_id);
+      spdlog::debug("[{}<={}] Unhandled Packet {}", id, src_id, pkt_id);
   }
   return false;
 }
@@ -31,7 +31,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode)
   _fw.uuid[ 4] = 0xBA; _fw.uuid[ 5] = 0xBA;
   _fw.uuid[ 6] = 0xF0; _fw.uuid[ 7] = 0x0D;
   _fw.uuid[ 8] = 0xBA; _fw.uuid[ 9] = 0xBA;
-  _fw.uuid[10] = 0xD0; _fw.uuid[11] = this_id;
+  _fw.uuid[10] = 0x00; _fw.uuid[11] = this_id;
   _fw.pairing_done = false;
   _fw.fw_test_version_number = 0x0;
   _fw.hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
@@ -39,7 +39,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode)
   _fw.is_valid = true;
   _comm->_vescpp[id] = this;
 
-  spdlog::debug("[{0}/0x{0:2X}] New VESCpp instance, device_mode: {1}", id, _device_mode);
+  spdlog::debug("[{}] New VESCpp instance, device_mode: {}", id, _device_mode);
   if(auto* _can = dynamic_cast<comm::CAN*>(comm))
   {
     if(_device_mode)
@@ -67,8 +67,8 @@ bool VESCpp::send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uin
 
 bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start, size_t len)
 {
-  //spdlog::debug("Process raw packet from {}, len {}", src_id, len);
-  //spdlog::debug("    => {:np}", spdlog::to_hex(buff));  
+  spdlog::trace("[{}<={}] Process raw packet", id, src_id, len);
+  spdlog::trace("    => {:np}", spdlog::to_hex(buff));  
   if(len <= 2)
   {
     auto pkt_id = buff[start];
@@ -82,9 +82,9 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
     {
       case ::VESC::COMM_FW_VERSION:
          spdlog::debug("[{}=>{}] Reply to FW_VERSION request", id, src_id);
-        return send(comm, src_id, _fw);
+        return send(comm, src_id, _fw, 0x01);
       default:
-        spdlog::debug("[{}=>{}] Unhandled Request for Packet {}", id, src_id, pkt_id);
+        spdlog::warn("[{}<={}] Unhandled Request for Packet {}", id, src_id, pkt_id);
     }
     return false;
   }
@@ -95,7 +95,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
 
 bool VESCpp::add_peer(VESC::BoardId board_id, VESC::HwTypeId typ)
 {
-  //spdlog::debug("[{0}/0x{0:02X}] Add VESC Peer {1}: {2}", id, board_id, ::VESC::HW_TYPE_s(typ));
+  spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(typ));
 
   switch(typ)
   {
@@ -106,9 +106,8 @@ bool VESCpp::add_peer(VESC::BoardId board_id, VESC::HwTypeId typ)
       _devs[board_id] = std::make_unique<VESCCustomHw>(board_id);
       break;
     default:
-      spdlog::error("[{0}/0x{0:02X}] Unsupported Peer type {1}/{2} for ID {3}", id, typ, ::VESC::HW_TYPE_s(typ), board_id);  
-      _devs[board_id] = std::make_unique<VESCCustomHw>(board_id);
-      //return false;
+      spdlog::warn("[{}] Unsupported Peer type {}/{} for Peer {}", id, typ, ::VESC::HW_TYPE_s(typ), board_id);  
+      _devs[board_id] = std::make_unique<VESCDevice>(board_id);
   }
   // SendRequest for FW_VERSION
   VESC::packets::FwVersion pkt(true);
@@ -120,7 +119,7 @@ bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& p
   DataBuffer pktbuf, buf;
   if(!pkt.encode(pktbuf))
   {
-    spdlog::debug("[{}=>{}] Could not encode Packet {} from {} to {}", id, tgt_id, pkt.id);
+    spdlog::error("[{}=>{}] Could not encode Packet {}", id, tgt_id, pkt.id);
     return false;
   }
   uint16_t sz = pktbuf.size();
@@ -137,8 +136,8 @@ bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& p
   {
     uint16_t idx=0;
     auto pkt_crc = ::VESC::crc16(pktbuf,idx);
-    //spdlog::debug("[{}=>{}] Send CAN_PACKET_FILL_RX_BUFFER or CAN_PACKET_FILL_RX_BUFFER_LONG for Pkt {}, len {}, crc 0x{:04X}", id, tgt_id, pkt.id, sz, pkt_crc);
-    //spdlog::debug("    => {:np}", spdlog::to_hex(pktbuf));  
+    spdlog::trace("[{}=>{}] Send CAN_PACKET_FILL_RX_BUFFER or CAN_PACKET_FILL_RX_BUFFER_LONG for Pkt {}, len {}, crc 0x{:04X}", id, tgt_id, pkt.id, sz, pkt_crc);
+    spdlog::trace("    => {:np}", spdlog::to_hex(pktbuf));  
     while(idx<sz)
     {
       buf.clear();
@@ -161,13 +160,13 @@ bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& p
       const auto can_id = ((idx<255 ? ::VESC::CAN_PACKET_FILL_RX_BUFFER : ::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG)<<8)|tgt_id;
       if(!can->write(can_id,buf.data(),buf.size()))
       {
-        //spdlog::error("[{}=>{}] Pkt {} Could not write {}/{}, {} bytes", id, tgt_id, pkt.id, idx, sz, max);
+        spdlog::error("[{}=>{}] Pkt {} Could not write {}/{}, {} bytes", id, tgt_id, pkt.id, idx, sz, max);
         return false;
       }
       std::this_thread::sleep_for(std::chrono::microseconds(10));
       idx += max;
     }
-    spdlog::debug("[{}=>{}] Send CAN_PACKET_PROCESS_RX_BUFFER for Pkt {}, len {}/{}, crc 0x{:04X}, send_cmd {}", id, tgt_id, pkt.id, idx, sz, pkt_crc, send_cmd);
+    spdlog::trace("[{}=>{}] Send CAN_PACKET_PROCESS_RX_BUFFER for Pkt {}, len {}/{}, crc 0x{:04X}, send_cmd {}", id, tgt_id, pkt.id, idx, sz, pkt_crc, send_cmd);
     buf.clear();
     buf.push_back(id);
     buf.push_back(send_cmd);
@@ -186,21 +185,21 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
   auto* can = dynamic_cast<comm::CAN*>(_comm);
   if(!can)
     return {};
-  spdlog::debug("[{0}] Scan bus for VESC boards", id);
+  spdlog::debug("[{}] Scan CAN bus for VESC boards", id);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> out;
   auto& hdlr = can->_can_handlers.emplace_back(((comm::CAN::Id)::VESC::CAN_PACKET_PONG<<8)|id, 
     [this, &out](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
     {
-      //spdlog::debug("[{0}] Got CAN PONG: {1:pn}", id, spdlog::to_hex(data, data+len));
+      spdlog::trace("[{}] Got CAN PONG: {:pn}", id, spdlog::to_hex(data, data+len));
       out.emplace_back((VESC::BoardId)(data[0]), (VESC::HwTypeId)(data[1]));
     });
   for(uint8_t board_id=0;board_id<0xFF;board_id++)
   {
     uint8_t data = id&0xFF;
-    //spdlog::debug("[{0}=>{1}] Send PING", id, board_id);
+    spdlog::trace("[{}=>{}] Send PING", id, board_id);
     if(!can->write((::VESC::CAN_PACKET_PING<<8)| board_id, &data, 1))
     {
-      spdlog::error("{0}] Error when sending PING to {2}: {3}", id, board_id);
+      spdlog::error("[{}=>{}] Error when sending PING", id, board_id);
     }
     std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
@@ -214,13 +213,13 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
       --it;
     }
   }
-  //spdlog::debug("[{0}] Done scanning bus for VESC boards", _port);
+  spdlog::debug("[{}] Done scanning CAN bus for VESC boards", id);
   return out;
 }
 
 void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
-  //spdlog::debug("[{0}] Got CAN_PACKET_PROCESS_SHORT_BUFFER: {1:pn}", id, spdlog::to_hex(data, data+len));
+  spdlog::trace("[{}] Got CAN_PACKET_PROCESS_SHORT_BUFFER: {:pn}", id, spdlog::to_hex(data, data+len));
   if(len < 2)
     return;
 
@@ -236,14 +235,14 @@ void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, co
     return;
 
   if(!processRawPacket(can, src_id, b, 0, pkt_len))
-    spdlog::error(" Could not process Short Packet {}", pkt_id);
+    spdlog::error("[{}<={}] Could not process Short Packet {}", id, src_id, tgt_id, pkt_id);
 }
 
 void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
   const bool isLong = ((can_id&0xFF00)>>8) == ::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG;
   const auto& header_len = (isLong ? 2 : 1);
-  //spdlog::debug("[{0}] Got {1}      : {2:pn}", id, isLong ? "CAN_PACKET_FILL_RX_BUFFER_LONG" : "CAN_PACKET_FILL_RX_BUFFER", spdlog::to_hex(data, data+len));
+  spdlog::trace("[{}] Got {}      : {:pn}", id, isLong ? "CAN_PACKET_FILL_RX_BUFFER_LONG" : "CAN_PACKET_FILL_RX_BUFFER", spdlog::to_hex(data, data+len));
   uint16_t rx_idx = (isLong ? (data[1]<<8) : 0x0000)| data[0];
   auto find_pkt = [this](PktState st, uint16_t rx_idx) -> size_t
   {
@@ -265,10 +264,10 @@ void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const ui
     return;
   }
   auto& pkt = _rx_pkts[pkt_idx];
-  //if(rx_idx == 0x00)
-  //  spdlog::debug("  Start buffering Packet {}", pkt_idx);
-  //else
-  //  spdlog::debug("  Buffering Packet {}, from {} to {}", pkt_idx, pkt.index, pkt.index+len-header_len);
+  if(rx_idx == 0x00)
+    spdlog::trace("[{}] Start buffering Packet {}", id, pkt_idx);
+  else
+    spdlog::trace("[{}] Buffering Packet {}, from {} to {}", id, pkt_idx, pkt.index, pkt.index+len-header_len);
   pkt.last_t = Time::now();
   pkt.state = PktState::Streaming;
   
@@ -279,8 +278,7 @@ void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const ui
 
 void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
-  //spdlog::debug("[{0}] Got CAN_PACKET_PROCESS_RX_BUFFER   : {1:pn}", id, spdlog::to_hex(data, data+len));
-  //auto board_id = data[0];
+  spdlog::trace("[{}] Got CAN_PACKET_PROCESS_RX_BUFFER   : {:pn}", id, spdlog::to_hex(data, data+len));
   auto tgt_id   = can_id&0xFF;
   auto src_id   = data[0];
   auto cmd_send = data[1];
@@ -302,7 +300,7 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
   //spdlog::debug("  ==> Pkt  index: {}", pkt_idx);
   if(pkt_idx >= _rx_pkts.size())
   {
-    spdlog::debug(" Can't process Packet with length: {}", rx_len);
+    spdlog::debug("[{}] Can't process Packet with length: {}", id, rx_len);
     return;
   }
   auto& pkt = _rx_pkts[pkt_idx];
@@ -310,8 +308,8 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
   auto pkt_crc = ::VESC::crc16(pkt.buffer);
   if(pkt_crc == rx_crc)
   {
-    //spdlog::debug("  Process Packet {} with from {}, for {} cmd_send {}, length {}/{}, crc 0x{:04X}/0x{:04X}", pkt_idx, src_id, tgt_id, cmd_send, pkt_len, rx_len, pkt_crc, rx_crc);
-    //spdlog::debug("    => {:np}", spdlog::to_hex(pkt.buffer));  
+    spdlog::trace("[{}][{}<={}] Process Packet {}, length {}/{}, crc 0x{:04X}/0x{:04X}, cmd_send: {}", id, tgt_id, src_id, pkt_idx, pkt_len, rx_len, pkt_crc, rx_crc, cmd_send);
+    spdlog::trace("    => {:np}", spdlog::to_hex(pkt.buffer));  
 
     switch(cmd_send)
     {
@@ -321,20 +319,20 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
         if(tgt_id == id)
         {
           if(!processRawPacket(can, src_id, pkt.buffer, 0, pkt_len))
-            spdlog::error(" Could not process Packet {}", pkt_idx);
+            spdlog::error("[{}<={}] Could not process Packet {}", id, src_id, pkt_idx);
         }
         break;
       case 2:
         //vesc_tool: //commands_process_packet(rx_buffer, rxbuf_len, 0);
         break;
       default:
-        spdlog::error("  Unknown cmd_send value. Drop Packet {}", pkt_idx);
+        spdlog::error("[{}<={}] Unknown cmd_send value. Drop Packet {}", id, src_id, pkt_idx);
         break;
     }
   } 
   else
   {
-    spdlog::error("  CRC mismatch. Drop Packet {} with length {}/{}, crc 0x{:04X}/0x{:04X}", pkt_idx, pkt_len, rx_len, pkt_crc, rx_crc);
+    spdlog::error("[{}<={}] CRC mismatch. Drop Packet {}, length {}/{}, crc 0x{:04X}/0x{:04X}, cmd_send: {}", id, tgt_id, src_id, pkt_idx, pkt_len, rx_len, pkt_crc, rx_crc, cmd_send);
   }
 
   // Reset Buffer 
@@ -345,12 +343,12 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
 
 void VESCpp::pongCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
-  spdlog::debug("[{0}] Got CAN_PACKET_PONG                : {1:pn}", id, spdlog::to_hex(data, data+len));
+  spdlog::trace("[{}] Got CAN_PACKET_PONG                : {:pn}", id, spdlog::to_hex(data, data+len));
 }
 
 void VESCpp::pingCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
-  //spdlog::debug("[{0}] Got CAN_PACKET_PING                : {1:pn}", id, spdlog::to_hex(data, data+len));
+  spdlog::trace("[{}] Got CAN_PACKET_PING                : {:pn}", id, spdlog::to_hex(data, data+len));
   const auto& src_id = len < 1 ? 0x00 : data[0];
 
   uint8_t tx_data[2] = { id, fw.hw_type_vesc};

@@ -12,7 +12,7 @@ namespace vescpp::comm
 CAN::CAN(const std::string_view& can_port)
 : _port(can_port)
 {
-  spdlog::info("[{}] Opening CAN Port...", _port);
+  spdlog::debug("[{}] Opening CAN Port...", _port);
   //if(!_can_rx.open(_port, std::bind(&CAN::canRXcb, this, std::placeholders::_1))) 
   //{
   //  spdlog::error("[{}] Could not open CAN Port...", _port);
@@ -24,10 +24,8 @@ CAN::CAN(const std::string_view& can_port)
   }
   while(!_can._rx_running)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  spdlog::info("[{}] CAN Port is open !", _port);
-
+  spdlog::debug("[{}] CAN Port is open !", _port);
 }
-
 
 void CAN::canRXcb(const can_frame& frame)
 {
@@ -56,13 +54,13 @@ void CAN::canRXcb(const can_frame& frame)
       }
     }
     if(handleable)
-      spdlog::debug("[{0}] Got Unhandled CAN frame, ID: [{1}/0x{1:02X}], Data: {2:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
+      spdlog::warn("[{}] Got Unhandled CAN frame, ID: 0x{:08X}, Data: {:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
   }  
 }
 
 bool CAN::write(const can_frame& fr)
 {
-  //spdlog::debug("[{0}] Write CAN ID: {2}/0x{2:02X}", _port, fr.can_id);
+  spdlog::trace("[{}] Write CAN frame, ID: 0x{:08X}, Data: {:pn}", _port, fr.can_id, spdlog::to_hex(fr.data, fr.data+fr.can_dlc));
   return _can.write(fr);
 }
 
@@ -70,7 +68,6 @@ bool CAN::write(const Id id, const uint8_t data[8], const uint8_t len)
 {
   can_frame fr;
   fr.can_id = id;
-  //if(fr.can_id > 0x7FF)
   fr.can_id |= CAN_EFF_FLAG;
   fr.can_dlc = len;
   memcpy(fr.data, data, len);
@@ -98,16 +95,15 @@ bool SocketCAN::open(const std::string_view& interface
   _sock_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
   if (_sock_fd == -1)
   {
-    spdlog::error("Error: Unable to create a CAN socket");
+    spdlog::error("[{}] Unable to create a CAN socket", interface);
     return false;
   }
-  char name[16] = {};  // avoid stringop-truncation
+  char name[16] = {};
   strncpy(name, interface.data(), interface.size());
   strncpy(_intf_req.ifr_name, name, IFNAMSIZ);
-  if (ioctl(_sock_fd, SIOCGIFINDEX, &_intf_req) == -1) // Get the index of the network interface
+  if (ioctl(_sock_fd, SIOCGIFINDEX, &_intf_req) == -1)
   {
-    spdlog::error("Unable to select CAN interface {}: I/O control error", name);
-    // Invalidate unusable socket
+    spdlog::error("[{}] Unable to select CAN interface: I/O control error", name);
     close();
     return false;
   }
@@ -134,7 +130,7 @@ bool SocketCAN::open(const std::string_view& interface
     spdlog::error("[{}] Unable to start RX thread", name);
     return false;
   }
-  //spdlog::info("Successfully started receiver thread with ID {}", _rx_thread_id);
+  spdlog::trace("[{}] Successfully started receiver thread with ID {}", name, _rx_thread_id);
   sched_param sched{ .sched_priority = thread_priority };
   pthread_setschedparam(_rx_thread_id, SCHED_FIFO, &sched);
   return true;
