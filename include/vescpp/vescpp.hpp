@@ -17,22 +17,10 @@ public:
   {
   }
 
-  virtual bool decodePacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start, size_t len)
-  {
-    const auto pkt_id = buff[start];
-    switch(pkt_id)
-    {
-      case ::VESC::COMM_FW_VERSION:
-        //spdlog::debug("[VESC][{}] Decoding FwVersion", id);
-        return _fw.decode(buff, start, len);
-      default:
-        spdlog::debug("Unhandled Packet {}",pkt_id);
-    }
-    return false;
-  }
+  virtual bool decodePacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start=0, size_t len=0);
 
-  const VESC::BoardId& id=_id;
-  const VESC::packets::FwVersion& fw=_fw; 
+  const VESC::BoardId& id = _id;
+  const VESC::packets::FwVersion& fw = _fw; 
 private:
   VESC::BoardId _id;
 protected:
@@ -60,49 +48,34 @@ class VESCCustomHw
       //spdlog::debug("[{}] New VESCCustomHw !", id);
     }
 };
+
 class VESCpp
 : public VESCDevice
 {
 public:
-  VESCpp(VESC::BoardId this_id, Comm* comm);
+  VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode=true);
   ~VESCpp() = default;
 
-  bool send(const VESC::BoardId id, const VESC::Packet* pkt);
-
-  bool processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start=0, size_t len=0)
-  {
-    //spdlog::debug("Process raw packet from {}, len {}", src_id, len);
-    if(len == 2)
-    {
-      auto pkt_id = buff[start];
-      auto payload = buff[start+1];
-
-      DataBuffer outb;
-      //spdlog::debug("Decoding request for Pkt Id: {}", pkt_id);
-      switch(pkt_id)
-      {
-        case ::VESC::COMM_FW_VERSION:
-          return comm->send(id, src_id, _fw);
-        default:
-          spdlog::debug("Unhandled Request for Packet {}",pkt_id);
-      }
-      return false;
-    }
-    if(auto it = _devs.find(src_id); it != _devs.end())
-      return it->second->decodePacket(comm, src_id, buff, start, len);
-    return false;
-  }
+  bool send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd=0x00);
+  bool processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start=0, size_t len=0);
 
   bool add_peer(const VESC::BoardId id, const VESC::HwTypeId typ);
 
-  std::map<VESC::BoardId, std::unique_ptr<VESCDevice>> _local_devs;
+  // CAN 
+  bool sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd);
+  std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scanCAN(std::chrono::milliseconds timeout_ms);
+
   std::map<VESC::BoardId, std::unique_ptr<VESCDevice>> _devs;
 private:
-  Comm* const         _comm;
+  Comm* const _comm;
+  const bool  _device_mode;
 
+  // CAN
+  // Callbacks
   void pingCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len);
-  
+  void pongCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len);
   // CAN Packets handling
+  
   enum class PktState
   {
     Idle,

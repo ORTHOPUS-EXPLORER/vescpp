@@ -46,38 +46,18 @@ void CAN::canRXcb(const can_frame& frame)
   }
   if(!handled)
   {
-    //spdlog::debug("[{0}] Got Unhandled CAN frame, ID: [{1}/0x{1:02X}], Data: {2:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
+    bool handleable = false;
+    for(const auto& v: _vescpp)
+    {
+      if(v.first == can_id&0xFF)
+      {
+        handleable = true;
+        break;
+      }
+    }
+    if(handleable)
+      spdlog::debug("[{0}] Got Unhandled CAN frame, ID: [{1}/0x{1:02X}], Data: {2:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
   }  
-}
-
-bool CAN::send(const VESC::BoardId src_id, const VESC::BoardId tgt_id, VESC::Packet& pkt)
-{
-  DataBuffer pktbuf, buf;
-  if(!pkt.encode(pktbuf))
-  {
-    spdlog::debug("[{}=>{}] Could not encode Packet {} from {} to {}", src_id, tgt_id, pkt.id);
-    return false;
-  }
-  auto sz = pktbuf.size();
-  if(sz <= 6)
-  {
-    //spdlog::debug("[{}>{}] Send CAN_PACKET_PROCESS_SHORT_BUFFER for {}", src_id, tgt_id, pkt.id);
-    buf.push_back(src_id);   
-    buf.push_back(0x00); // Process packet at receiver
-    for(const auto& c: pktbuf)
-      buf.push_back(c);
-    return write((::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|tgt_id,buf.data(),buf.size());
-  }
-  else
-  {
-    spdlog::debug("[{}=>{}] Send CAN_PACKET_FILL_RX_BUFFER for Pkt {}, len {}", src_id, tgt_id, pkt.id, sz);
-    spdlog::debug("[{}=>{}] Send CAN_PACKET_FILL_RX_BUFFER_LONG for Pkt {}, len {}", src_id, tgt_id, pkt.id, sz);
-    spdlog::debug("[{}=>{}] Send CAN_PACKET_PROCESS_RX_BUFFER for Pkt {}, len {}", src_id, tgt_id, pkt.id, sz);
-    // FIXME: see vesc_interface.cpp:3251
-    return true;
-  }
-  
-  return false;
 }
 
 bool CAN::write(const can_frame& fr)
@@ -90,49 +70,14 @@ bool CAN::write(const Id id, const uint8_t data[8], const uint8_t len)
 {
   can_frame fr;
   fr.can_id = id;
-  if(fr.can_id > 0x7FF)
-    fr.can_id |= CAN_EFF_FLAG;
+  //if(fr.can_id > 0x7FF)
+  fr.can_id |= CAN_EFF_FLAG;
   fr.can_dlc = len;
   memcpy(fr.data, data, len);
   return write(fr);
 }
 
-std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> CAN::scan(const VESC::BoardId src_id, std::chrono::milliseconds timeout_ms)
-{
-  //spdlog::debug("[{0}] Scan bus for VESC boards", _port);
-  std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> out;
-  auto& hdlr = _can_handlers.emplace_back(((CAN::Id)::VESC::CAN_PACKET_PONG<<8)|src_id, 
-    [this, &out](CAN* can, const Id can_id, const uint8_t data[8], const uint8_t len)
-    {
-      //spdlog::debug("[{0}] Got CAN PONG: {1:pn}", _port, spdlog::to_hex(data, data+len));
-      out.emplace_back((VESC::BoardId)(data[0]), (VESC::HwTypeId)(data[1]));
-    });
-  for(uint8_t board_id=0;board_id<0xFF;board_id++)
-  {
-    uint8_t data = src_id&0xFF;
-    //spdlog::debug("[{0}] Send PING to {2}", _port, board_id);
-    if(!write((::VESC::CAN_PACKET_PING<<8)| board_id, &data, 1))
-    {
-      spdlog::error("{0}] Error when sending PING to {2}: {3}", _port, board_id);
-    }
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
-  }
-  std::this_thread::sleep_for(timeout_ms);
-  for (auto it=_can_handlers.begin(); it != _can_handlers.end();++it)
-  {
-    if(hdlr.first == it->first && &hdlr.second == &it->second)
-    {
-      //spdlog::debug("Remove handler");
-      _can_handlers.erase(it);
-      --it;
-    }
-  }
-  //spdlog::debug("[{0}] Done scanning bus for VESC boards", _port);
-  return out;
 }
-
-}
-
 
 namespace can
 {

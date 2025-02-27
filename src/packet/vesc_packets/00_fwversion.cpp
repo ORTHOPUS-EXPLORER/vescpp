@@ -11,18 +11,17 @@ bool FwVersion::encode_payload(DataBuffer& buf, size_t start, size_t max_len)
 {
     buf.push_back(fw_version_major);
     buf.push_back(fw_version_minor);
-    size_t n = hw_name.length()-1;
+    size_t name_length = hw_name.length()+1;
     for(const auto& c: hw_name)
-    {   
         buf.push_back(c);
-    }
+    buf.push_back('\0');
     for(const auto& c: uuid)
         buf.push_back(c);
     buf.push_back(pairing_done ? 0x01 : 0x00);
     buf.push_back(fw_test_version_number);
     buf.push_back(hw_type_vesc);
     buf.push_back(custom_config);
-    _payload_length = 18+hw_name.length();
+    _payload_length = 18+name_length;
     return true;
 }
 
