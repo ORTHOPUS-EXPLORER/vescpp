@@ -5,7 +5,7 @@ find_package(spdlog REQUIRED)
 find_package(lyra REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-# VESCpp example
+# VESCpp CLI
 add_executable(${PROJECT_NAME}
   cli.cpp
 )
@@ -16,4 +16,8 @@ PRIVATE
   lyra
   spdlog::spdlog
   nlohmann_json::nlohmann_json
+)
+
+install(TARGETS 
+  ${PROJECT_NAME}
 )
