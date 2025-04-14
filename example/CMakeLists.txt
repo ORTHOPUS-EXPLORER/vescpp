@@ -1,20 +1,8 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.22)
 project(vescpp_example)
 
-include(FetchContent)
-FetchContent_Declare(spdlog
-  GIT_REPOSITORY  https://github.com/gabime/spdlog
-  GIT_TAG         v1.10.0
-)
-FetchContent_Declare(lyra
-  GIT_REPOSITORY  https://github.com/bfgroup/Lyra
-  GIT_TAG         1.6.1
-)
-
-FetchContent_MakeAvailable(
-  spdlog
-  lyra
-)
+find_package(spdlog REQUIRED)
+find_package(lyra REQUIRED)
 
 # VESCpp example
 add_executable(${PROJECT_NAME}
@@ -24,6 +12,6 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
 PRIVATE
   vescpp
+  spdlog::spdlog
   lyra
-  spdlog
 )
