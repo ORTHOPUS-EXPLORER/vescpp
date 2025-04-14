@@ -51,10 +51,15 @@ int main(int argc, char**argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         for(auto& [id, v]: vesc._devs)
         {
-            if(!v->fw.is_valid)
+            auto* fw = v->fw();
+            if(!fw)
                 continue;
                 
-            spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, v->fw.fw_version_major, v->fw.fw_version_minor,  v->fw.hw_name.c_str(), spdlog::to_hex(v->fw.uuid));
+            spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid));
+            vescpp::VESC::packets::TerminalCmd cmdpkt("fwinfo");
+            spdlog::info("[VESC][{}/{}]=> {}", vesc.id, id, cmdpkt.str);
+            vesc.send(&can_comm, id, cmdpkt);
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
     }
     spdlog::info("Press enter to exit");

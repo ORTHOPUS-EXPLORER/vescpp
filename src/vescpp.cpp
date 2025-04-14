@@ -4,93 +4,118 @@
 namespace vescpp
 {
 
-bool VESCDevice::decodePacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start, size_t len)
-{
-  const auto pkt_id = buff[start];
-  switch(pkt_id)
-  {
-    case ::VESC::COMM_FW_VERSION:
-      //spdlog::debug("[VESC][{}] Decoding FwVersion", id);
-      return _fw.decode(buff, start, len);
-    default:
-      spdlog::debug("[{}<={}] Unhandled Packet {}", id, src_id, pkt_id);
-  }
-  return false;
-}
-
 VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode)
-: VESCDevice(this_id)
+: VESCDevice(this_id, nullptr, false)
 , _comm(comm)
 , _device_mode(device_mode)
+, _last_can_t()
+, _last_pkt_t()
 {
-  _fw.fw_version_major = 6;
-  _fw.fw_version_minor = 2;
-  _fw.hw_name = "VESCpp";
-  _fw.uuid[ 0] = 0xBA; _fw.uuid[ 1] = 0xBA;
-  _fw.uuid[ 2] = 0xD0; _fw.uuid[ 3] = 0x0D;
-  _fw.uuid[ 4] = 0xBA; _fw.uuid[ 5] = 0xBA;
-  _fw.uuid[ 6] = 0xF0; _fw.uuid[ 7] = 0x0D;
-  _fw.uuid[ 8] = 0xBA; _fw.uuid[ 9] = 0xBA;
-  _fw.uuid[10] = 0x00; _fw.uuid[11] = this_id;
-  _fw.pairing_done = false;
-  _fw.fw_test_version_number = 0x0;
-  _fw.hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
-  _fw.custom_config = 0x00;
-  _fw.is_valid = true;
-  _comm->_vescpp[id] = this;
+  VESC::packets::init();
 
+  fw.fw_version_major = 6;
+  fw.fw_version_minor = 2;
+  fw.hw_name = "VESCpp";
+  fw.uuid[ 0] = 0xBA; fw.uuid[ 1] = 0xBA;
+  fw.uuid[ 2] = 0xD0; fw.uuid[ 3] = 0x0D;
+  fw.uuid[ 4] = 0xBA; fw.uuid[ 5] = 0xBA;
+  fw.uuid[ 6] = 0xF0; fw.uuid[ 7] = 0x0D;
+  fw.uuid[ 8] = 0xBA; fw.uuid[ 9] = 0xBA;
+  fw.uuid[10] = 0x00; fw.uuid[11] = this_id;
+  fw.pairing_done = false;
+  fw.fw_test_version_number = 0x0;
+  fw.hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
+  fw.custom_config = 0x00;
+  _fw = &fw;
+  _comm->_vescpp[id] = this;
+  
   spdlog::debug("[{}] New VESCpp instance, device_mode: {}", id, _device_mode);
   if(auto* _can = dynamic_cast<comm::CAN*>(comm))
   {
+    using namespace std::placeholders;
+
     if(_device_mode)
-      _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PING<<8)|id, std::bind(&VESCpp::pingCB, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+      _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PING<<8)|id, std::bind(&VESCpp::pingCB, this, _1, _2, _3, _4));
     //else
-    //  _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id, std::bind(&VESCpp::pongCB, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    //  _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id, std::bind(&VESCpp::pongCB, this, _1, _2, _3, _4));
 
     _rx_pkts.resize(10);
     for(auto& pkt: _rx_pkts)
       pkt.state = PktState::Idle;
-
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id, std::bind(&VESCpp::processShortBufferCB, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id      , std::bind(&VESCpp::fillRXBufferCB,       this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id) , std::bind(&VESCpp::fillRXBufferCB,       this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id)   , std::bind(&VESCpp::processRXBufferCB,    this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+    
+    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id   , std::bind(&VESCpp::processShortBufferCB, this, _1, _2, _3, _4));
+    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id         , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id)    , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id) , std::bind(&VESCpp::processRXBufferCB,    this, _1, _2, _3, _4));
   }
+  if(!device_mode)
+  {
+    /*pktAddHandler(::VESC::COMM_SET_MCCONF,[this](Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt)
+    {
+      //auto* ppkt = dynamic_cast<VESC::packets::SetMCConf*>(pkt.get());
+      spdlog::info("[VESC][{}<={}] COMM_SET_MCCONF OK", this->id, src_id);
+      return true;
+    });*/
+  }
+}
+
+std::chrono::milliseconds VESCpp::msSinceLastCANPkt() const
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(Time::now() - _last_can_t);
+}
+
+std::chrono::milliseconds VESCpp::msSinceLastVESCkt() const
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(Time::now() - _last_pkt_t);
 }
 
 bool VESCpp::send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd)
 {
+  if(!comm)
+    comm = _comm;
+
   if(auto* can = dynamic_cast<comm::CAN*>(comm))
     return sendCAN(can, tgt_id, pkt, send_cmd);
   return false;
 }
 
+bool VESCpp::pktProcess(Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt)
+{
+  if(VESCDevice::pktProcess(comm, src_id, pkt))
+  {
+    spdlog::trace("[VESCpp][{}<={}] Self handled Packet {}", id, src_id, pkt->id);
+    return true;
+  }
+
+  if(auto it = _devs.find(src_id); it != _devs.end())
+    return it->second->pktProcess(comm, src_id, pkt);
+
+  spdlog::debug("[VESCpp][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
+  return false;
+}
+
 bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start, size_t len)
 {
+  _last_pkt_t = Time::now();
   spdlog::trace("[{}<={}] Process raw packet", id, src_id, len);
   spdlog::trace("    => {:np}", spdlog::to_hex(buff));  
-  if(len <= 2)
+  if(len < 1)
   {
-    auto pkt_id = buff[start];
-    auto payload = buff[start+1];
-
-    DataBuffer outb;
-    if(!_device_mode)
-      return true;
-    //spdlog::debug("Decoding request for Pkt Id: {}", pkt_id);
-    switch(pkt_id)
-    {
-      case ::VESC::COMM_FW_VERSION:
-         spdlog::debug("[{}=>{}] Reply to FW_VERSION request", id, src_id);
-        return send(comm, src_id, _fw, 0x01);
-      default:
-        spdlog::warn("[{}<={}] Unhandled Request for Packet {}", id, src_id, pkt_id);
-    }
+    spdlog::error("[{}<={}] Can't process empty packet", id, src_id);
     return false;
   }
-  if(auto it = _devs.find(src_id); it != _devs.end())
-    return it->second->decodePacket(comm, src_id, buff, start, len);
-  return false;
+  auto pkt_id = (VESC::PktId)buff[0];
+  auto pkt = VESC::packets::create(pkt_id, buff, start, len);
+  if(!pkt)
+  {
+    spdlog::error("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
+    return false;
+  }
+  spdlog::trace("Created packet for ID: {}, {}", pkt_id, fmt::ptr(pkt));
+  bool r = pktProcess(comm, src_id, pkt);
+  if(!r)
+    spdlog::error("[{}<={}] Could not process Packet with ID: {}", id, src_id, pkt_id);
+  return r;
 }
 
 bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd)
@@ -198,20 +223,23 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
 
 void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
+  _last_can_t = Time::now();
   spdlog::trace("[{}] Got CAN_PACKET_PROCESS_SHORT_BUFFER: {:pn}", id, spdlog::to_hex(data, data+len));
-  if(len < 2)
+  if(len < 3)
     return;
 
   const auto& tgt_id = can_id&0xFF;
-  const auto& src_id = data[0];
-  const auto& pkt_id = data[1];
-  const auto& pkt_len = len-1;
-  DataBuffer b; b.resize(pkt_len);
-  for(size_t i=0;i<pkt_len;i++)
-    b[i] = data[i+1];
-  
+
   if(tgt_id != id)
     return;
+
+  const auto& src_id = data[0];
+                    // data[1] ???
+  const auto& pkt_id = data[2];
+  const auto& pkt_len = len-2;
+  DataBuffer b; b.resize(pkt_len);
+  for(size_t i=0;i<pkt_len;i++)
+    b[i] = data[i+2];
 
   if(!processRawPacket(can, src_id, b, 0, pkt_len))
     spdlog::error("[{}<={}] Could not process Short Packet {}", id, src_id, tgt_id, pkt_id);
@@ -219,10 +247,13 @@ void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, co
 
 void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
+  _last_can_t = Time::now();
   const bool isLong = ((can_id&0xFF00)>>8) == ::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG;
   const auto& header_len = (isLong ? 2 : 1);
   spdlog::trace("[{}] Got {}      : {:pn}", id, isLong ? "CAN_PACKET_FILL_RX_BUFFER_LONG" : "CAN_PACKET_FILL_RX_BUFFER", spdlog::to_hex(data, data+len));
-  uint16_t rx_idx = (isLong ? (data[1]<<8) : 0x0000)| data[0];
+  uint16_t rx_idx = data[0];
+  if(isLong)
+    rx_idx = (rx_idx << 8) | data[1] ;
   auto find_pkt = [this](PktState st, uint16_t rx_idx) -> size_t
   {
     size_t i = 0;
@@ -257,6 +288,7 @@ void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const ui
 
 void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
+  _last_can_t = Time::now();
   spdlog::trace("[{}] Got CAN_PACKET_PROCESS_RX_BUFFER   : {:pn}", id, spdlog::to_hex(data, data+len));
   auto tgt_id   = can_id&0xFF;
   auto src_id   = data[0];
@@ -324,11 +356,13 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
 
 void VESCpp::pongCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
+  _last_can_t = Time::now();
   spdlog::trace("[{}] Got CAN_PACKET_PONG                : {:pn}", id, spdlog::to_hex(data, data+len));
 }
 
 void VESCpp::pingCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
 {
+  _last_can_t = Time::now();
   spdlog::trace("[{}] Got CAN_PACKET_PING                : {:pn}", id, spdlog::to_hex(data, data+len));
   const auto& src_id = len < 1 ? 0x00 : data[0];
 
