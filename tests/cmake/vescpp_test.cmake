@@ -1,19 +1,18 @@
 cmake_minimum_required(VERSION 3.22)
 
-if(NOT TARGET Catch2)
-  find_package(Catch2 3.8.0 QUIET)
-  if(NOT Catch2_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(Catch2
-      GIT_REPOSITORY  https://github.com/catchorg/Catch2
-      GIT_TAG         v3.8.0
-      GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
-      FIND_PACKAGE_ARGS
-    )
-    FetchContent_MakeAvailable(Catch2)
+if(NOT TARGET Catch2::Catch2WithMain)
+  include(FetchContent)
+  FetchContent_Declare(Catch2
+    GIT_REPOSITORY  https://github.com/catchorg/Catch2
+    GIT_TAG         v3.8.0
+    GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
+    FIND_PACKAGE_ARGS 3.8.0 QUIET
+  )
+  FetchContent_MakeAvailable(Catch2)
+  if(NOT catch2_FOUND)
     message(STATUS "[+] Use FetchContent to get Catch2 v3.8.0")
   else()
-    message(STATUS "[+] Use System-provided spdlog ${spdlog_VERSION}")
+    message(STATUS "[+] Use System-provided spdlog ${Catch2_VERSION}")
   endif()
 endif()
 
@@ -62,7 +61,7 @@ function(add_test_target)
   PUBLIC
     ${ARG_LIBRARIES}
     vescpp
-    Catch2WithMain
+    Catch2::Catch2WithMain
   )
 
   set_target_properties(test_${ARG_NAME}
