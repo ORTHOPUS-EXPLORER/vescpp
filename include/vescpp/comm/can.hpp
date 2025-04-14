@@ -57,6 +57,9 @@ public:
   bool write(const can_frame& frame);
   bool write(const Id id, const uint8_t data[8], const uint8_t len);
 
+  size_t addHandler(const Id id, std::function<Handler> cb);
+  bool removeHandler(size_t index);
+
   std::vector<std::pair<Id, std::function<Handler>>> _can_handlers;
 private:
   const std::string   _port;

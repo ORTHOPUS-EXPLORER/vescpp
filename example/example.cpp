@@ -3,6 +3,8 @@
 #include "vescpp/vescpp.hpp"
 #include "vescpp/comm/can.hpp"
 
+using namespace std::chrono_literals;
+
 int main(int argc, char**argv) 
 {
     spdlog::cfg::load_env_levels();
@@ -38,28 +40,18 @@ int main(int argc, char**argv)
     spdlog::info("[{}] Start VESCpp with ID {}, device_mode: {}", can_port, board_id, device_mode);
 
     auto can_comm = vescpp::comm::CAN(can_port);
-    auto vesc = vescpp::VESCpp(board_id, &can_comm, device_mode);
+    auto vescpp = vescpp::VESCpp(board_id, &can_comm, device_mode);
     
     if(!device_mode)
     {
-        const auto& can_ids = vesc.scanCAN(std::chrono::milliseconds(100));
+        const auto& can_ids = vescpp.scanCAN(10ms);
         for(const auto& [id,typ]: can_ids)
         {
-            vesc.add_peer(id,typ);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        for(auto& [id, v]: vesc._devs)
-        {
-            auto* fw = v->fw();
-            if(!fw)
-                continue;
-                
-            spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid));
-            vescpp::VESC::packets::TerminalCmd cmdpkt("fwinfo");
-            spdlog::info("[VESC][{}/{}]=> {}", vesc.id, id, cmdpkt.str);
-            vesc.send(&can_comm, id, cmdpkt);
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+          if(auto v = vescpp.add_peer(id,typ,100ms); v != nullptr)
+          {
+            const auto& fw = v->fw();           
+            spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
+          }
         }
     }
     spdlog::info("Press enter to exit");

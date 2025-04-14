@@ -16,23 +16,23 @@ class VESCpp;
 class VESCDevice
 {
 public:
-  VESCDevice(const VESC::BoardId id, VESCpp* host=nullptr, bool add_handlers=true);
+  VESCDevice(const VESC::BoardId board_id, VESCpp* host=nullptr, bool add_handlers=true);
 
-  using pkt_handler_cb_t = std::function<bool(Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt)>;
+  using pkt_handler_cb_t = std::function<bool(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)>;
 
   virtual bool pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb);
 
-  virtual bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt);
+  virtual bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt);
 
   bool send(VESC::Packet& pkt);
   bool sendRequest(VESC::Packet& pkt);
   
-  bool sendCmd(const std::string_view& cmd);
+  bool sendCmd(const std::string_view& cmd, std::chrono::milliseconds delay_after_send=std::chrono::milliseconds(5));
 
   static constexpr auto _defaultTimeout = std::chrono::milliseconds(1000);
 
   template<typename PktT, typename RPktT=PktT>
-  std::unique_ptr<RPktT> request(const std::chrono::milliseconds& timeout=_defaultTimeout)
+  std::shared_ptr<RPktT> request(const std::chrono::milliseconds& timeout=_defaultTimeout)
   {
     PktT pkt;
     pkt.isRequest = true;
@@ -44,32 +44,26 @@ public:
   }
 
   template<typename PktT>
-  std::unique_ptr<PktT> waitFor(const std::chrono::milliseconds& timeout=_defaultTimeout)
+  std::shared_ptr<PktT> waitFor(const std::chrono::milliseconds& timeout=_defaultTimeout)
   {
     _promise = {};
     _wait_for_pkt_id = PktT::id();
     auto f = _promise.get_future();
     if(f.wait_for(timeout) == std::future_status::ready)
     {
-      auto r = f.get();
-      if (auto pkt = dynamic_cast<PktT*>(r.get()))
-      {
-        r.release();
-        return std::unique_ptr<PktT>(pkt);
-      }
+        return std::dynamic_pointer_cast<PktT>(f.get());
     }
     return nullptr;
   }
 
-  const VESC::BoardId& id = _id;
-  VESC::packets::FwVersion* fw() const { return _fw; }
+  const VESC::BoardId id;
+  const std::shared_ptr<VESC::packets::FwVersion>& fw() { return _fw; };
 private:
-  VESC::BoardId _id;
   VESC::PktId _wait_for_pkt_id = VESC::InvalidPktId;
-  std::promise<std::unique_ptr<VESC::Packet>> _promise;
+  std::promise<std::shared_ptr<VESC::Packet>> _promise;
 protected:
-  VESC::packets::FwVersion* _fw;
   VESCpp* _host;
+  std::shared_ptr<VESC::packets::FwVersion> _fw;
   std::map<VESC::PktId, pkt_handler_cb_t> _pkt_handlers;
 };
 
@@ -104,12 +98,12 @@ public:
 
   bool send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd=0x00);
   bool processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start=0, size_t len=0);
-  bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt) override;
+  bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt) override;
 
-  template<class CustomHW=VESCCustomHw>
-  bool add_peer(VESC::BoardId board_id, VESC::HwTypeId typ)
+  template<class HwType=VESCDevice>
+  std::shared_ptr<VESCDevice> add_peer(VESC::BoardId board_id, VESC::HwTypeId typ, std::chrono::milliseconds timeout_ms=std::chrono::milliseconds(200))
   {
-    spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(typ));
+    
 
     VESCDevice* dev = nullptr;
     switch(typ)
@@ -118,29 +112,29 @@ public:
         dev = new VESCDrive(board_id, this);
         break;
       case ::VESC::HW_TYPE_CUSTOM_MODULE:
-        dev = new CustomHW(board_id, this);
+        dev = new HwType(board_id, this);
         break;
       default:
         spdlog::warn("[{}] Unsupported Peer type {}/{} for Peer {}", id, typ, ::VESC::HW_TYPE_s(typ), board_id);  
         dev = new VESCDevice(board_id, this);
     }
-    if(!dev)
-      return false;
-    _devs[board_id] = dev;
-    
+    _devs[board_id] = std::shared_ptr<VESCDevice>(dev);
     // SendRequest for FW_VERSION
-    //return dev->request<VESC::packets::FwVersion>(200ms).get() != nullptr;
-    using namespace std::chrono_literals;
-    VESC::packets::FwVersion pkt;
-    return dev->sendRequest(pkt);
-    //return dev->waitFor<VESC::packets::FwVersion>(200ms).get() != nullptr;
+    if(dev->request<VESC::packets::FwVersion>(timeout_ms) != nullptr)
+    {
+      spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(typ));
+      return std::dynamic_pointer_cast<HwType>(_devs[board_id]);
+    }
+    spdlog::warn("[{}] VESC Peer {} did not reply to FwVersion request, ignore it", id, board_id);
+    _devs[board_id] = nullptr;
+    return nullptr;
   } 
 
   template<class HwType=VESCDevice>
-  HwType* get_peer(VESC::BoardId board_id)
+  std::shared_ptr<HwType> get_peer(VESC::BoardId board_id)
   {
     if(auto it = _devs.find(board_id); it != _devs.end())
-      return dynamic_cast<HwType*>(it->second);
+      return std::dynamic_pointer_cast<HwType>(it->second);
     return nullptr;
   }
 
@@ -150,15 +144,15 @@ public:
 
   std::chrono::milliseconds msSinceLastCANPkt() const;
   std::chrono::milliseconds msSinceLastVESCkt() const;
-
   
-  std::map<VESC::BoardId, VESCDevice*> _devs;
+  std::map<VESC::BoardId, std::shared_ptr<VESCDevice>> _devs;
   protected:
   Comm* const _comm;
   const bool  _device_mode;
+
+  static constexpr std::chrono::microseconds _tx_delay_us{10};
   
 private:
-  VESC::packets::FwVersion fw; 
   Time::time_point _last_can_t, _last_pkt_t;
   // CAN
   // Callbacks

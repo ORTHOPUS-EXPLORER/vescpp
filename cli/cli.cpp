@@ -22,17 +22,31 @@ int main(int argc, char **argv)
   spdlog::cfg::load_env_levels();
 
   bool show_help = false,
-       force_load = false;
+       force_load = false,
+       scan_bus = false;
   unsigned int host_id = 51,
                device_id = 11,
                exit_delay_ms = 100;
   std::string can_port = "can0",
               cmd = "",
               conf_type = "",
+              conf_dir ="",
               conf_file = "";
   std::vector<std::string> cmd_args;
 
-  auto cli = lyra::help(show_help).description("VESCpp CLI") | lyra::opt(can_port, "port")["-P"]("CAN port (eg: can0)") | lyra::opt(host_id, "id")["-I"]("Host ID (1-254)") | lyra::opt(device_id, "id")["-i"]("Device ID (1-254)") | lyra::opt(exit_delay_ms, "delay")["-x"]("Delay, in ms, after last CAN message before exiting CLI") | lyra::opt(force_load)["-f"]("Force loading config") | lyra::group().sequential() | lyra::arg(cmd, "cmd").help("Command: save_conf, load_conf, proxy").required() | lyra::arg(conf_type, "type").help("Type (when using save_conf/load_conf): app, motor, custom") | lyra::arg(conf_file, "file").help("Input/Ouput file (when using save_conf/load_conf)") | lyra::group() | lyra::arg(cmd_args, "args").help("Command arguments");
+  auto cli = lyra::help(show_help).description("VESCpp CLI") 
+  | lyra::opt(can_port, "port")["-P"]("CAN port (eg: can0)") 
+  | lyra::opt(host_id, "id")["-I"]("Host ID (1-254)") 
+  | lyra::opt(device_id, "id")["-i"]("Device ID (1-254)") 
+  | lyra::opt(exit_delay_ms, "delay")["-x"]("Delay, in ms, after last CAN message before exiting CLI") 
+  | lyra::opt(force_load)["-f"]("Force loading config") 
+  | lyra::opt(conf_dir, "dir")["-D"]("Directory to load/files from") 
+  | lyra::group().sequential() 
+    | lyra::arg(cmd, "cmd").help("Command: save_conf, load_conf, proxy, scan").required()
+    | lyra::arg(conf_type, "type").help("Type (when using save_conf/load_conf): app, motor, custom") 
+    | lyra::arg(conf_file, "file").help("Input/Ouput file (when using save_conf/load_conf)") 
+  | lyra::group() 
+    | lyra::arg(cmd_args, "args").help("Command arguments");
 
   device_id &= 0xFF;
 
@@ -51,28 +65,24 @@ int main(int argc, char **argv)
 
   auto can_comm = vescpp::comm::CAN(can_port);
   auto vescpp = vescpp::VESCpp(host_id, &can_comm, false);
-  if (!vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC))
+  if(cmd == "scan")
   {
-    spdlog::error("Can't add peer. Abort");
-    return EXIT_FAILURE;
+    const auto& can_ids = vescpp.scanCAN(10ms);
+    for(const auto& [id,typ]: can_ids)
+    {
+      if(auto v = vescpp.add_peer(id,typ,100ms); v != nullptr)
+      {
+        const auto& fw = v->fw();           
+        spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
+      }
+    }
+    return 0;
   }
 
-  auto *vesc = vescpp.get_peer(device_id);
+  auto vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, 100ms);
   if (!vesc)
   {
-    spdlog::error("Can't get peer. Abort");
-    return EXIT_FAILURE;
-  }
-
-  size_t wait = 10;
-  do
-  {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  } while (vesc->fw() == nullptr && --wait);
-
-  if (!vesc->fw())
-  {
-    spdlog::error("Can't get Firmware version from peer. Abort");
+    spdlog::error("Can't add peer. Abort");
     return EXIT_FAILURE;
   }
 
@@ -103,6 +113,9 @@ int main(int argc, char **argv)
       spdlog::error("No input file specified, abort");
       return -1;
     }
+    if(conf_dir.length())
+      conf_file = conf_dir+"/"+conf_file;
+
     spdlog::info("Loading Config from {}", conf_file);
     if (conf_type == "app" && loadFromFile<packets::GetAppConf, packets::SetAppConf>(conf_file, *vesc, force_load))
       spdlog::info("Loaded App config to {}", conf_file);
@@ -119,7 +132,12 @@ int main(int argc, char **argv)
       std::stringstream ss;
       ss << std::put_time(std::localtime(&t), "%Y%m%d_%H%M%S");
       const auto now_s = ss.str();
-      conf_file = conf_type + "_conf_" + now_s + ".json";
+      conf_file = conf_type + "_conf_"+std::to_string(vesc->id)+"_"+ now_s + ".json";
+    }
+    if(conf_dir.length())
+    {
+      std::filesystem::create_directories(conf_dir);
+      conf_file = conf_dir+"/"+conf_file;
     }
 
     if (conf_type == "app" && writeToFile<packets::GetAppConf>(conf_file, *vesc))
@@ -135,7 +153,7 @@ int main(int argc, char **argv)
   if (exit_delay_ms)
   {
     while (vescpp.msSinceLastCANPkt() < std::chrono::milliseconds(exit_delay_ms))
-      std::this_thread::sleep_for(10ms);
+      std::this_thread::sleep_for(1ms);
   }
   else
   {
@@ -153,6 +171,7 @@ bool writeToFile(const std::string &name, vescpp::VESCDevice &vesc)
   {
     spdlog::info("Saving Config to {}", name);
     json j;
+    j["board_id"] = vesc.id;
     j["info"] = vesc.fw()->toJson();
     j["data"] = cnf->toJson();
     std::ofstream ofile(name);
@@ -168,12 +187,18 @@ bool loadFromFile(const std::string &name, vescpp::VESCDevice &vesc, bool force)
   SetPktT spkt;
   std::ifstream ifile(name);
   json j = json::parse(ifile);
+  if (!force && vesc.id != j["board_id"])
+    spdlog::warn("Board ID mismatch");
   packets::FwVersion fwpkt;
   fwpkt.fromJson(j["info"]);
-  if (!force && vesc.fw()->uuid != fwpkt.uuid)
+  if (vesc.fw()->uuid != fwpkt.uuid)
   {
-    spdlog::error("UUID mismatch");
-    return false;
+    if(!force)
+    {
+      spdlog::error("UUID mismatch, abort");
+      return false;
+    }
+    spdlog::warn("UUID mismatch, continue anyway");
   }
   if (!spkt.fromJson(j["data"]))
   {
@@ -186,8 +211,12 @@ bool loadFromFile(const std::string &name, vescpp::VESCDevice &vesc, bool force)
   {
     if (!force && gpkt->signature != spkt.signature)
     {
-      spdlog::error("Signatures mismatch, abort");
-      return false;
+      if(!force)
+      {
+        spdlog::error("Signatures mismatch, abort");
+        return false;
+      }
+      spdlog::warn("Signatures mismatch, continue anyway");
     }
     vesc.send(spkt);
     if (auto cpkt = vesc.waitFor<SetPktT>(); cpkt && cpkt->isAck)

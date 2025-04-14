@@ -6,24 +6,22 @@
 
 #include "vescpp/vescpp.hpp"
 
+using namespace std::chrono_literals;
+
 namespace vescpp::comm 
 {
 
 CAN::CAN(const std::string_view& can_port)
 : _port(can_port)
 {
+  using namespace std::placeholders;
   spdlog::debug("[{}] Opening CAN Port...", _port);
-  //if(!_can_rx.open(_port, std::bind(&CAN::canRXcb, this, std::placeholders::_1))) 
-  //{
-  //  spdlog::error("[{}] Could not open CAN Port...", _port);
-  //}
-  //if(!_can.open(_port, nullptr)) 
-  if(!_can.open(_port, std::bind(&CAN::canRXcb, this, std::placeholders::_1))) 
+  if(!_can.open(_port, std::bind(&CAN::canRXcb, this, _1))) 
   {
     spdlog::error("[{}] Could not open CAN Port...", _port);
   }
   while(!_can._rx_running)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(1ms);
   spdlog::debug("[{}] CAN Port is open !", _port);
 }
 
@@ -45,7 +43,7 @@ void CAN::canRXcb(const can_frame& frame)
   if(!handled)
   {
     bool handleable = false;
-    for(const auto& v: _vescpp)
+    for(const auto& v: _vescpp)  // FIXME: Figure out if we keep this or not
     {
       if(v.first == can_id&0xFF)
       {
@@ -54,8 +52,22 @@ void CAN::canRXcb(const can_frame& frame)
       }
     }
     if(handleable)
-      spdlog::warn("[{}] Got Unhandled CAN frame, ID: 0x{:08X}, Data: {:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
+      spdlog::warn("[CAN::canRXcb][{}] Got Unhandled CAN frame, ID: 0x{:08X}, Data: {:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
   }  
+}
+
+size_t CAN::addHandler(const Id id, std::function<Handler> cb)
+{
+  _can_handlers.emplace_back(id, cb);
+  return _can_handlers.size()-1;
+}
+bool CAN::removeHandler(size_t index)
+{
+  auto& hdlr = _can_handlers[index];
+  // FIXME: Fugly, better cleanup !
+  hdlr.first = 0xFFFF;
+  hdlr.second = nullptr;
+  return true;
 }
 
 bool CAN::write(const can_frame& fr)

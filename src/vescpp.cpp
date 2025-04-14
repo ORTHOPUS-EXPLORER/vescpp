@@ -1,6 +1,8 @@
 #include "vescpp/vescpp.hpp"
 #include "vescpp/packet/vesc_packets.hpp"
 
+using namespace std::chrono_literals;
+
 namespace vescpp
 {
 
@@ -13,21 +15,22 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode)
 {
   VESC::packets::init();
 
-  fw.fw_version_major = 6;
-  fw.fw_version_minor = 2;
-  fw.hw_name = "VESCpp";
-  fw.uuid[ 0] = 0xBA; fw.uuid[ 1] = 0xBA;
-  fw.uuid[ 2] = 0xD0; fw.uuid[ 3] = 0x0D;
-  fw.uuid[ 4] = 0xBA; fw.uuid[ 5] = 0xBA;
-  fw.uuid[ 6] = 0xF0; fw.uuid[ 7] = 0x0D;
-  fw.uuid[ 8] = 0xBA; fw.uuid[ 9] = 0xBA;
-  fw.uuid[10] = 0x00; fw.uuid[11] = this_id;
-  fw.pairing_done = false;
-  fw.fw_test_version_number = 0x0;
-  fw.hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
-  fw.custom_config = 0x00;
-  _fw = &fw;
-  _comm->_vescpp[id] = this;
+  _fw = std::make_shared<VESC::packets::FwVersion>();
+  _fw->fw_version_major = 6;
+  _fw->fw_version_minor = 2;
+  _fw->hw_name = "VESCpp";
+  _fw->uuid[ 0] = 0xBA; _fw->uuid[ 1] = 0xBA;
+  _fw->uuid[ 2] = 0xD0; _fw->uuid[ 3] = 0x0D;
+  _fw->uuid[ 4] = 0xBA; _fw->uuid[ 5] = 0xBA;
+  _fw->uuid[ 6] = 0xF0; _fw->uuid[ 7] = 0x0D;
+  _fw->uuid[ 8] = 0xBA; _fw->uuid[ 9] = 0xBA;
+  _fw->uuid[10] = 0x00; _fw->uuid[11] = this_id;
+  _fw->pairing_done = false;
+  _fw->fw_test_version_number = 0x0;
+  _fw->hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
+  _fw->custom_config = 0x00;
+
+  _comm->_vescpp[id] = this; // FIXME: Figure out if we keep this or not
   
   spdlog::debug("[{}] New VESCpp instance, device_mode: {}", id, _device_mode);
   if(auto* _can = dynamic_cast<comm::CAN*>(comm))
@@ -50,9 +53,9 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm, bool device_mode)
   }
   if(!device_mode)
   {
-    /*pktAddHandler(::VESC::COMM_SET_MCCONF,[this](Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt)
+    /*pktAddHandler(::VESC::COMM_SET_MCCONF,[this](Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)
     {
-      //auto* ppkt = dynamic_cast<VESC::packets::SetMCConf*>(pkt.get());
+      //auto* ppkt = std::dynamic_pointer_cast<VESC::packets::SetMCConf>(pkt);
       spdlog::info("[VESC][{}<={}] COMM_SET_MCCONF OK", this->id, src_id);
       return true;
     });*/
@@ -79,18 +82,21 @@ bool VESCpp::send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uin
   return false;
 }
 
-bool VESCpp::pktProcess(Comm* comm, const VESC::BoardId src_id, std::unique_ptr<VESC::Packet>& pkt)
+bool VESCpp::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)
 {
   if(VESCDevice::pktProcess(comm, src_id, pkt))
   {
-    spdlog::trace("[VESCpp][{}<={}] Self handled Packet {}", id, src_id, pkt->id);
+    spdlog::trace("[VESCpp::pktProcess][{}<={}] Self handled Packet {}", id, src_id, pkt->id);
     return true;
   }
 
   if(auto it = _devs.find(src_id); it != _devs.end())
+  {
+    spdlog::trace("[VESCpp::pktProcess][{}<={}] Forward to device {}", id, src_id, pkt->id);
     return it->second->pktProcess(comm, src_id, pkt);
+  }
 
-  spdlog::debug("[VESCpp][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
+  spdlog::debug("[VESCpp::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
   return false;
 }
 
@@ -105,7 +111,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
     return false;
   }
   auto pkt_id = (VESC::PktId)buff[0];
-  auto pkt = VESC::packets::create(pkt_id, buff, start, len);
+  std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
     spdlog::error("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
@@ -114,7 +120,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   spdlog::trace("Created packet for ID: {}, {}", pkt_id, fmt::ptr(pkt));
   bool r = pktProcess(comm, src_id, pkt);
   if(!r)
-    spdlog::error("[{}<={}] Could not process Packet with ID: {}", id, src_id, pkt_id);
+    spdlog::error("[VESCpp::processRawPacket][{}<={}] Could not process Packet with ID: {}", id, src_id, pkt_id);
   return r;
 }
 
@@ -167,7 +173,7 @@ bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& p
         spdlog::error("[{}=>{}] Pkt {} Could not write {}/{}, {} bytes", id, tgt_id, pkt.id, idx, sz, max);
         return false;
       }
-      std::this_thread::sleep_for(std::chrono::microseconds(10));
+      std::this_thread::sleep_for(_tx_delay_us); // Small delay to avoid overfilling the TX buffer
       idx += max;
     }
     spdlog::trace("[{}=>{}] Send CAN_PACKET_PROCESS_RX_BUFFER for Pkt {}, len {}/{}, crc 0x{:04X}, send_cmd {}", id, tgt_id, pkt.id, idx, sz, pkt_crc, send_cmd);
@@ -189,14 +195,17 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
   auto* can = dynamic_cast<comm::CAN*>(_comm);
   if(!can)
     return {};
-  spdlog::debug("[{}] Scan CAN bus for VESC boards", id);
+  spdlog::trace("[{}] Scan CAN bus for VESC boards", id);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> out;
-  auto& hdlr = can->_can_handlers.emplace_back(((comm::CAN::Id)::VESC::CAN_PACKET_PONG<<8)|id, 
-    [this, &out](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
+  Time::time_point last_pong_time=Time::now();
+  auto hdlr_id = can->addHandler((::VESC::CAN_PACKET_PONG<<8)|id,
+    [this, &last_pong_time, &out](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
     {
+      last_pong_time = Time::now();
       spdlog::trace("[{}] Got CAN PONG: {:pn}", id, spdlog::to_hex(data, data+len));
       out.emplace_back((VESC::BoardId)(data[0]), (VESC::HwTypeId)(data[1]));
     });
+  spdlog::trace("[{}] Sending PINGs...", id);
   for(uint8_t board_id=0;board_id<0xFF;board_id++)
   {
     uint8_t data = id&0xFF;
@@ -205,19 +214,14 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
     {
       spdlog::error("[{}=>{}] Error when sending PING", id, board_id);
     }
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    std::this_thread::sleep_for(_tx_delay_us); // Small delay to avoid overfilling the TX buffer
   }
-  std::this_thread::sleep_for(timeout_ms);
-  for (auto it=can->_can_handlers.begin(); it !=can->_can_handlers.end();++it)
-  {
-    if(hdlr.first == it->first && &hdlr.second == &it->second)
-    {
-      //spdlog::debug("Remove handler");
-      can->_can_handlers.erase(it);
-      --it;
-    }
-  }
-  spdlog::debug("[{}] Done scanning CAN bus for VESC boards", id);
+  spdlog::trace("[{}] Done sending PINGs", id);
+
+  while (Time::now()-last_pong_time < timeout_ms)
+    std::this_thread::sleep_for(1ms);
+  spdlog::trace("[{}] Done scanning CAN bus for VESC boards", id);
+  can->removeHandler(hdlr_id);
   return out;
 }
 
@@ -242,7 +246,7 @@ void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, co
     b[i] = data[i+2];
 
   if(!processRawPacket(can, src_id, b, 0, pkt_len))
-    spdlog::error("[{}<={}] Could not process Short Packet {}", id, src_id, tgt_id, pkt_id);
+    spdlog::error("[VESCpp::processShortBufferCB][{}<={}] Could not process Short Packet {}", id, src_id, tgt_id, pkt_id);
 }
 
 void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
@@ -332,7 +336,7 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
         if(tgt_id == id)
         {
           if(!processRawPacket(can, src_id, pkt.buffer, 0, pkt_len))
-            spdlog::error("[{}<={}] Could not process Packet {}", id, src_id, pkt_idx);
+            spdlog::error("[VESCpp::processRXBufferCB][{}<={}] Could not process Packet {}", id, src_id, pkt_idx);
         }
         break;
       case 2:
@@ -366,7 +370,7 @@ void VESCpp::pingCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t da
   spdlog::trace("[{}] Got CAN_PACKET_PING                : {:pn}", id, spdlog::to_hex(data, data+len));
   const auto& src_id = len < 1 ? 0x00 : data[0];
 
-  uint8_t tx_data[2] = { id, fw.hw_type_vesc};
+  uint8_t tx_data[2] = { id, _fw->hw_type_vesc};
   can->write((::VESC::CAN_PACKET_PONG<<8)|src_id, tx_data, 2);
 }
 
