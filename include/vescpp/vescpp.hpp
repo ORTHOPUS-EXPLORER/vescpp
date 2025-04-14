@@ -101,7 +101,7 @@ public:
   bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt) override;
 
   template<class HwType=VESCDevice>
-  std::shared_ptr<VESCDevice> add_peer(VESC::BoardId board_id, VESC::HwTypeId typ, std::chrono::milliseconds timeout_ms=std::chrono::milliseconds(200))
+  std::shared_ptr<HwType> add_peer(VESC::BoardId board_id, VESC::HwTypeId typ, std::chrono::milliseconds timeout_ms=std::chrono::milliseconds(200))
   {
     
 
