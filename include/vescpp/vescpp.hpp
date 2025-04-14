@@ -82,6 +82,14 @@ public:
     return true;
   } 
 
+  template<class HwType=VESCDevice>
+  HwType* get_peer(VESC::BoardId board_id)
+  {
+    if(auto it = _devs.find(board_id); it != _devs.end())
+      return dynamic_cast<HwType*>(it->second);
+    return nullptr;
+  }
+
   // CAN 
   bool sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scanCAN(std::chrono::milliseconds timeout_ms);
