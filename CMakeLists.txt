@@ -1,19 +1,17 @@
 cmake_minimum_required(VERSION 3.25)
 project(vescpp)
 
+option(VESCPP_BUILD_EXAMPLE "Build example application" ON)
+option(VESCPP_BUILD_TESTS   "Build unittests"           ON)
+
 include(FetchContent)
 FetchContent_Declare(spdlog
   GIT_REPOSITORY  https://github.com/gabime/spdlog
   GIT_TAG         v1.10.0
 )
-FetchContent_Declare(lyra
-  GIT_REPOSITORY  https://github.com/bfgroup/Lyra
-  GIT_TAG         1.6.1
-)
 
 FetchContent_MakeAvailable(
   spdlog
-  lyra
 )
 
 # VESCpp
@@ -39,16 +37,10 @@ PROPERTIES
   CXX_STANDARD 17
 )
 
-# VESCpp example
-add_executable(${PROJECT_NAME}_example
-  src/example.cpp
-)
+if(VESCPP_BUILD_EXAMPLE)
+  add_subdirectory(example)
+endif()
 
-target_link_libraries(${PROJECT_NAME}_example
-PRIVATE
-  ${PROJECT_NAME}
-  lyra
-  spdlog
-)
-
-add_subdirectory(tests)
+if(VESCPP_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()
