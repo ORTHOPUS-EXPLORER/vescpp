@@ -42,7 +42,7 @@ public:
       return std::dynamic_pointer_cast<HwType>(_devs[board_id]);
     }
     spdlog::warn("[{}] VESC Peer {} did not reply to FwVersion request, ignore it", id, board_id);
-    _devs.erase(board_id);
+    _devs.extract(board_id);
     return nullptr;
   }
 

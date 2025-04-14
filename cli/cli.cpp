@@ -104,6 +104,7 @@ int main(int argc, char **argv)
       // Find with UUID
       if(device_uuid.length())
       {
+        spdlog::info("[{}][{}] ID not found, look for Target UUID {}", can_port, host_id, device_uuid);
         for(const auto& [id, v]: peers)
         {
           const auto& fw = v->fw();
@@ -119,6 +120,7 @@ int main(int argc, char **argv)
       if(!vesc && peers.size() == 1)
       {
         vesc = peers.begin()->second;
+        spdlog::info("[{}][{}] Fallback to the only connected device: {}", can_port, host_id, vesc->id);
       }
     }
 
