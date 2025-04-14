@@ -130,6 +130,11 @@ public:
     return nullptr;
   } 
 
+  const std::map<VESC::BoardId, std::shared_ptr<VESCDevice>> peers() const
+  {
+    return _devs;
+  }
+
   template<class HwType=VESCDevice>
   std::shared_ptr<HwType> get_peer(VESC::BoardId board_id)
   {
@@ -140,7 +145,7 @@ public:
 
   // CAN 
   bool sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd);
-  std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scanCAN(std::chrono::milliseconds timeout_ms);
+  std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scanCAN(bool add_devices, std::chrono::milliseconds timeout_ms);
 
   std::chrono::milliseconds msSinceLastCANPkt() const;
   std::chrono::milliseconds msSinceLastVESCkt() const;

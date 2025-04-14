@@ -23,23 +23,26 @@ int main(int argc, char **argv)
 
   bool show_help = false,
        force_load = false,
-       scan_bus = false;
+       use_single_dev = false;
   unsigned int host_id = 51,
-               device_id = 11,
+               device_id = 0,
                exit_delay_ms = 100;
   std::string can_port = "can0",
               cmd = "",
               conf_type = "",
               conf_dir ="",
-              conf_file = "";
+              conf_file = "",
+              device_uuid = "";
   std::vector<std::string> cmd_args;
 
   auto cli = lyra::help(show_help).description("VESCpp CLI") 
   | lyra::opt(can_port, "port")["-P"]("CAN port (eg: can0)") 
   | lyra::opt(host_id, "id")["-I"]("Host ID (1-254)") 
   | lyra::opt(device_id, "id")["-i"]("Device ID (1-254)") 
+  | lyra::opt(device_uuid, "uuid")["-u"]("Device UUID (hex, 12bytes)") 
   | lyra::opt(exit_delay_ms, "delay")["-x"]("Delay, in ms, after last CAN message before exiting CLI") 
   | lyra::opt(force_load)["-f"]("Force loading config") 
+  | lyra::opt(use_single_dev)["-S"]("Use autodetected Device when there's only one on the CAN bus") 
   | lyra::opt(conf_dir, "dir")["-D"]("Directory to load/files from") 
   | lyra::group().sequential() 
     | lyra::arg(cmd, "cmd").help("Command: save_conf, load_conf, proxy, scan").required()
@@ -65,25 +68,56 @@ int main(int argc, char **argv)
 
   auto can_comm = vescpp::comm::CAN(can_port);
   auto vescpp = vescpp::VESCpp(host_id, &can_comm, false);
+
   if(cmd == "scan")
   {
-    const auto& can_ids = vescpp.scanCAN(10ms);
-    for(const auto& [id,typ]: can_ids)
-    {
-      if(auto v = vescpp.add_peer(id,typ,100ms); v != nullptr)
-      {
-        const auto& fw = v->fw();           
-        spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
-      }
+    vescpp.scanCAN(true, 10ms);
+    const auto& peers = vescpp.peers();
+    for(const auto& [_, v]: peers)
+    { 
+      const auto& fw = v->fw();           
+      spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x {4:spn}", v->id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
     }
-    return 0;
+    return EXIT_SUCCESS;
   }
 
-  auto vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, 100ms);
-  if (!vesc)
+  std::shared_ptr<VESCDevice> vesc(nullptr);
+  // use provided ID
+  if(device_id > 0)
+    vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, 100ms);
+  if(!vesc)
   {
-    spdlog::error("Can't add peer. Abort");
+    vescpp.scanCAN(true, 10ms);
+    const auto& peers = vescpp.peers();
+    // Find with UUID
+    if(device_uuid.length())
+    {
+      for(const auto& [id, v]: peers)
+      { 
+        const auto& fw = v->fw();
+        const auto duuid = fmt::format("0x{:spn}", spdlog::to_hex(fw->uuid));
+        if(duuid == device_uuid)
+        {
+          vesc = v;
+          break;
+        }
+      }
+    } 
+    // Fallback
+    if(!vesc && peers.size() == 1)
+    {
+      vesc = peers.begin()->second;
+    }
+  }
+
+  if(!vesc)
+  {
+    spdlog::error("Can't find device with ID '{}' or UUID '{}'. Abort", device_id, device_uuid);
     return EXIT_FAILURE;
+  }
+  {
+    const auto& fw = vesc->fw();
+    spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", vesc->id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
   }
 
   if (cmd == "proxy")

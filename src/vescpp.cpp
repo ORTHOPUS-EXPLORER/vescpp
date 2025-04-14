@@ -190,7 +190,7 @@ bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& p
   return false;
 }
 
-std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chrono::milliseconds timeout_ms)
+std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(bool add_devices, std::chrono::milliseconds timeout_ms)
 {
   auto* can = dynamic_cast<comm::CAN*>(_comm);
   if(!can)
@@ -222,6 +222,18 @@ std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> VESCpp::scanCAN(std::chron
     std::this_thread::sleep_for(1ms);
   spdlog::trace("[{}] Done scanning CAN bus for VESC boards", id);
   can->removeHandler(hdlr_id);
+  if(add_devices)
+  {
+    for(const auto& [id,typ]: out)
+    {
+      if(auto v = this->add_peer(id,typ,100ms); v != nullptr)
+      {
+        const auto& fw = v->fw();           
+        spdlog::debug("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x {4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
+      }
+    }
+  }
+  
   return out;
 }
 

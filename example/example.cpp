@@ -44,14 +44,12 @@ int main(int argc, char**argv)
     
     if(!device_mode)
     {
-        const auto& can_ids = vescpp.scanCAN(10ms);
-        for(const auto& [id,typ]: can_ids)
-        {
-          if(auto v = vescpp.add_peer(id,typ,100ms); v != nullptr)
-          {
-            const auto& fw = v->fw();           
-            spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
-          }
+        vescpp.scanCAN(true, 10ms);
+        const auto& peers = vescpp.peers();
+        for(const auto& [_, v]: peers)
+        { 
+          const auto& fw = v->fw();           
+          spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x {4:spn}", v->id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid)); 
         }
     }
     spdlog::info("Press enter to exit");
