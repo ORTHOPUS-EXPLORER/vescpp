@@ -30,7 +30,7 @@ void CAN::canRXcb(const can_frame& frame)
   auto can_id = frame.can_id&CAN_ERR_MASK;
   auto& can_data = frame.data;
   auto can_len = frame.can_dlc;
-  bool handled=false;;
+  bool handled = false;
   for(const auto& [hdlr_id,hdlr_cb]: _can_handlers)
   {
     //spdlog::debug("  CAN ID vs CAN Handler ID: {} vs {}", can_id, hdlr_id);

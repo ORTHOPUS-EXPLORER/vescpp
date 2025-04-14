@@ -13,6 +13,7 @@ namespace vescpp
   namespace VESC
   {
     using BoardId = uint8_t;
+    constexpr BoardId InvalidBoardId = 0x00;
     using HwTypeId = ::VESC::HW_TYPE;
     using PktId = ::VESC::COMM_PACKET_ID;
     constexpr PktId InvalidPktId = (::VESC::COMM_PACKET_ID)0xFFF;
