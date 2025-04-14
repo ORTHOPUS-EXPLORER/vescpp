@@ -72,6 +72,11 @@ PROPERTIES
   CXX_STANDARD 17
 )
 
+set_target_properties(${PROJECT_NAME}
+PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
+
 install(
   DIRECTORY   include/
   DESTINATION include
