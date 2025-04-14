@@ -59,16 +59,39 @@ public:
   bool send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd=0x00);
   bool processRawPacket(Comm* comm, const VESC::BoardId src_id, const DataBuffer& buff, size_t start=0, size_t len=0);
 
-  bool add_peer(const VESC::BoardId id, const VESC::HwTypeId typ);
+  template<class CustomHW=VESCCustomHw>
+  bool add_peer(VESC::BoardId board_id, VESC::HwTypeId typ)
+  {
+    spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(typ));
+
+    switch(typ)
+    {
+      case ::VESC::HW_TYPE_VESC:
+        _devs[board_id] = new VESCDrive(board_id);//std::make_unique<VESCDrive>(board_id);
+        break;
+      case ::VESC::HW_TYPE_CUSTOM_MODULE:
+        _devs[board_id] = new CustomHW(board_id);//std::make_unique<CustomHW>(board_id);
+        break;
+      default:
+        spdlog::warn("[{}] Unsupported Peer type {}/{} for Peer {}", id, typ, ::VESC::HW_TYPE_s(typ), board_id);  
+        _devs[board_id] = new VESCDevice(board_id);//std::make_unique<VESCDevice>(board_id);
+    }
+    // SendRequest for FW_VERSION
+    VESC::packets::FwVersion pkt(true);
+    send(_comm, board_id, pkt);
+    return true;
+  } 
 
   // CAN 
   bool sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> scanCAN(std::chrono::milliseconds timeout_ms);
 
-  std::map<VESC::BoardId, std::unique_ptr<VESCDevice>> _devs;
-private:
+  std::map<VESC::BoardId, VESCDevice*> _devs;
+protected:
   Comm* const _comm;
   const bool  _device_mode;
+  
+private:
 
   // CAN
   // Callbacks

@@ -93,27 +93,6 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   return false;
 }
 
-bool VESCpp::add_peer(VESC::BoardId board_id, VESC::HwTypeId typ)
-{
-  spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(typ));
-
-  switch(typ)
-  {
-    case ::VESC::HW_TYPE_VESC:
-      _devs[board_id] = std::make_unique<VESCDrive>(board_id);
-      break;
-    case ::VESC::HW_TYPE_CUSTOM_MODULE:
-      _devs[board_id] = std::make_unique<VESCCustomHw>(board_id);
-      break;
-    default:
-      spdlog::warn("[{}] Unsupported Peer type {}/{} for Peer {}", id, typ, ::VESC::HW_TYPE_s(typ), board_id);  
-      _devs[board_id] = std::make_unique<VESCDevice>(board_id);
-  }
-  // SendRequest for FW_VERSION
-  VESC::packets::FwVersion pkt(true);
-  return send(_comm, board_id, pkt);
-} 
-
 bool VESCpp::sendCAN(comm::CAN* can, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd)
 {
   DataBuffer pktbuf, buf;
@@ -223,7 +202,7 @@ void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, co
   if(len < 2)
     return;
 
-  const auto& tgt_id = id&0xFF;
+  const auto& tgt_id = can_id&0xFF;
   const auto& src_id = data[0];
   const auto& pkt_id = data[1];
   const auto& pkt_len = len-1;
@@ -300,7 +279,9 @@ void VESCpp::processRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const
   //spdlog::debug("  ==> Pkt  index: {}", pkt_idx);
   if(pkt_idx >= _rx_pkts.size())
   {
-    spdlog::debug("[{}] Can't process Packet with length: {}", id, rx_len);
+    spdlog::debug("[{}] Can't process packet. Unknown packet with length {}", id, rx_len);
+    for(const auto& p: _rx_pkts)
+    spdlog::debug("  available pkt, last_t: {}, state: {}, index: {}, data: {:np}", p.last_t.time_since_epoch().count(), (int)p.state, p.index, spdlog::to_hex(p.buffer));
     return;
   }
   auto& pkt = _rx_pkts[pkt_idx];
