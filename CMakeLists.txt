@@ -66,9 +66,10 @@ endif()
 # VESCpp
 add_library(${PROJECT_NAME} STATIC
   src/vescpp.cpp
-  src/vescdevice.cpp
-  src/veschost.cpp
-  src/vesctarget.cpp
+  src/vescpp/base.cpp
+  src/vescpp/device.cpp
+  src/vescpp/host.cpp
+  src/vescpp/target.cpp
   src/comm/can.cpp
   src/vesc/utils.cpp
   src/packet/packet.cpp

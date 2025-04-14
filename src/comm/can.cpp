@@ -8,7 +8,7 @@
 
 using namespace std::chrono_literals;
 
-namespace vescpp::comm 
+namespace vescpp::comm
 {
 
 CAN::CAN(const std::string_view& can_port)
@@ -16,7 +16,7 @@ CAN::CAN(const std::string_view& can_port)
 {
   using namespace std::placeholders;
   spdlog::debug("[{}] Opening CAN Port...", _port);
-  if(!_can.open(_port, std::bind(&CAN::canRXcb, this, _1))) 
+  if(!_can.open(_port, std::bind(&CAN::canRXcb, this, _1)))
   {
     spdlog::error("[{}] Could not open CAN Port...", _port);
   }
@@ -53,7 +53,7 @@ void CAN::canRXcb(const can_frame& frame)
     }
     if(handleable)
       spdlog::warn("[CAN::canRXcb][{}] Got Unhandled CAN frame, ID: 0x{:08X}, Data: {:pn}", _port, can_id, spdlog::to_hex(can_data, can_data+can_len));
-  }  
+  }
 }
 
 size_t CAN::addHandler(const Id id, std::function<Handler> cb)
