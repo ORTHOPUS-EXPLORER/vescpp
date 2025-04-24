@@ -46,7 +46,7 @@ bool VESCBase::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_pt
 
   if(_pkt_handlers.find(pkt->id) != _pkt_handlers.end())
   {
-    spdlog::debug("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
+    spdlog::trace("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
     r = _pkt_handlers[pkt->id](comm, src_id, pkt);
   }
 
@@ -158,7 +158,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
-    spdlog::error("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
+    spdlog::debug("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
     return false;
   }
   spdlog::trace("Created packet for ID: {}, {}", pkt_id, fmt::ptr(pkt));

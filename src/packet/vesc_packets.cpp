@@ -45,7 +45,7 @@ std::unique_ptr<Packet> create(PktId id, const DataBuffer& buf, size_t start, si
     spdlog::debug("[packets::create] Could not decode Packet with ID: {}", id);
     return nullptr;
   }
-  spdlog::debug("[packets::create] Unkown Packet Type with ID: {}", id);
+  //spdlog::debug("[packets::create] Unkown Packet Type with ID: {}", id);
   return nullptr;
 }
 
