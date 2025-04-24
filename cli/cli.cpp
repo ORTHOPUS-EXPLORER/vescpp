@@ -156,7 +156,7 @@ int main(int argc, char **argv)
     else if (cmd == "load_conf")
     {
       std::unique_ptr<vescpp::VESC::Packet> pkt;
-      bool force_load = false;
+      //bool force_load = false;
 
       if (!conf_file.length())
       {
@@ -276,7 +276,7 @@ bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, bool force)
   // Get current conf to match signature
   if (auto gpkt = vesc.request<GetPktT>(200ms))
   {
-    if (!force && gpkt->signature != spkt.signature)
+    if (gpkt->signature != spkt.signature)
     {
       if(!force)
       {
