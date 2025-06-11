@@ -38,7 +38,7 @@ bool VESCBase::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_pt
   bool r = false;
   if(_wait_for_pkt_id == pkt->id)
   {
-    //spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
+    spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
     _wait_for_pkt_id = VESC::InvalidPktId;
     _promise.set_value(pkt);
     r = true;

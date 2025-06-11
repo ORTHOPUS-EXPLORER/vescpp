@@ -4,6 +4,8 @@
 
 #include "heatshrink_encoder.h"
 
+using namespace std::chrono_literals;
+
 namespace vescpp
 {
 
@@ -71,6 +73,37 @@ bool VESCTarget::sendCmd(const std::string_view& cmd, std::chrono::milliseconds 
 bool readHex(const std::string& hex_filename, std::map<uint32_t, std::vector<uint8_t>>& hex_data);
 
 
+bool VESCTarget::eraseFirmware(bool isBootloader, bool fwdCan, bool isLzo, std::chrono::milliseconds delay_after_send, size_t fwSize)
+{
+  auto expect_id = ::VESC::COMM_ERASE_NEW_APP;
+  if(isBootloader)
+  {
+    // FIXME: Support all hardware
+    const auto id = fwdCan ? ::VESC::COMM_ERASE_BOOTLOADER_ALL_CAN : ::VESC::COMM_ERASE_BOOTLOADER;
+    auto pkt = vescpp::VESC::RawPacket(id,{});
+    expect_id = ::VESC::COMM_ERASE_BOOTLOADER;
+    this->send(pkt);
+  }
+  else
+  {
+    const auto id = fwdCan ? ::VESC::COMM_ERASE_NEW_APP_ALL_CAN : ::VESC::COMM_ERASE_NEW_APP;
+    auto pkt = vescpp::VESC::RawPacket(id,{fwSize});
+    this->send(pkt);
+  }
+  if(auto pkt = this->waitFor(expect_id, 20s))
+  {
+    if(pkt->data.size() != 1 || pkt->data[0] != 1)
+    {
+      spdlog::error("Erase failed. Abort");    
+      return false;
+    }
+    spdlog::info("Erase OK");
+    return true;
+  }
+  spdlog::error("Erase Timeout");
+  return false;
+}
+
 
 bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bool fwdCan, bool isLzo)
 {
@@ -80,8 +113,70 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
     spdlog::error("Can't read Hex file {:s}", fw_file);
     return false;
   }
+  size_t fwSize=0;
+  uint32_t fwOffset = 0;
   for(const auto& [addr, data]: hex_data)
+  {
+    fwSize += data.size();
     spdlog::debug("Addr {:08X}, Data {:8d}", addr, data.size());//spdlog::to_hex(data));
+  }
+
+  // FIXME: Support all hardware
+  if(fw()->hw_type_vesc != ::VESC::HW_TYPE_VESC)
+  {
+    spdlog::error("Only VESC HW firmware upgrade is currently supported. Abort");
+    return false;
+  }
+
+  // FIXME: Support FwdCan
+  if(fwdCan)
+  {
+    spdlog::error("CAN forward flash is not currently supported. Abort");
+    return false;
+  }
+
+  // FIXME: Support LZO
+  if(isLzo)
+  {
+    spdlog::error("Compressed flash is not currently supported. Abort");
+    return false;
+  }
+
+  // FIXME: Support Bootloader flash
+  if(isBootloader)
+  {
+    switch(fw()->hw_type_vesc)
+    {
+      case ::VESC::HW_TYPE_VESC:
+        fwOffset = 0x60000; // 1024*128*3 (BL is in FLASH_SECTOR_7 ?)
+        break;
+      default:
+        // FIXME: Support all hardware
+        break;
+    }
+    spdlog::error("Bootloader flash is not currently supported. Abort");
+    return false;
+  }
+  spdlog::debug("Erase firmware");
+  if(!this->eraseFirmware(isBootloader, fwdCan, isLzo, 1s, fwSize))
+  {
+    spdlog::error("Firmware erase failed");
+    return false;
+  }
+  
+  spdlog::debug("Send new firmware");
+  size_t startAddr = fwOffset;
+
+  if(!isBootloader)
+  {
+    spdlog::debug("Jump to Bootloader");
+    // FIXME: Support all hardware
+    const auto id = fwdCan ? ::VESC::COMM_JUMP_TO_BOOTLOADER_ALL_CAN : ::VESC::COMM_JUMP_TO_BOOTLOADER;
+    auto pkt = vescpp::VESC::RawPacket(id,{});
+    this->send(pkt);
+  }
+
+
   return true;
 }
 

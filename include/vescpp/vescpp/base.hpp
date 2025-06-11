@@ -90,10 +90,11 @@ public:
 
   const std::shared_ptr<VESC::packets::FwVersion>& fw() { return _fw; };
 
+  // Text command
   bool sendCmd(const std::string_view& cmd, std::chrono::milliseconds delay_after_send=std::chrono::milliseconds(5));
 
   bool flashFirmware(const std::string& fw_file, bool isBootloader, bool fwdCan, bool isLzo);
-
+  bool eraseFirmware(bool isBootloader, bool fwdCan, bool isLzo, std::chrono::milliseconds delay_after_send, size_t fwSize);
 protected:
   std::shared_ptr<VESC::packets::FwVersion> _fw;
 };
