@@ -54,4 +54,47 @@ bool Packet::decode(const DataBuffer& buf, size_t start, size_t len)
   return decode_payload(buf, start+1, len-1);
 }
 
+RawPacket::RawPacket(PktId id, size_t len_min, size_t len_max)
+  : Packet(id, len_min, len_max)
+{
+  data.reserve(len_max ? len_max : len_min);
+}
+
+RawPacket::RawPacket(PktId id, const DataBuffer& vec)
+  : Packet(id, vec.size(), 0)
+  , data(vec)
+{
+
+}
+
+RawPacket::RawPacket(PktId id, const DataBuffer& vec, size_t start, size_t len)
+  : Packet(id, vec.size(), 0)
+{
+  data.resize(len);
+  for(size_t i=0;i<len;i++)
+    data[i] = vec[start+i];
+}
+
+bool RawPacket::encode_payload(DataBuffer& buf, size_t start, size_t max_len)
+{
+  for(const auto& b: data)
+    buf.push_back(b);
+    _payload_length = data.size();
+        
+  return true;
+}
+
+bool RawPacket::decode_payload(const DataBuffer& buf, size_t start, size_t len)
+{
+  if(len < _payload_length_min)
+  {
+      spdlog::error("[RawPacket] Can't decode payload, not enough data: {}/{}", len, _payload_length_min);
+      return false;
+  }
+  data.resize(len);
+  for(size_t i=0;i<len;i++)
+    data[i] = buf[start+i];
+  return true;
+}
+
 }

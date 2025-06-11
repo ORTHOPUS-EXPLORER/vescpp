@@ -158,6 +158,25 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
+    spdlog::debug("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
+    if(_wait_for_pkt_id == pkt_id)
+    {
+      spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
+      _wait_for_pkt_id = VESC::InvalidPktId;
+      _promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
+      return true;
+    }
+    if(auto it = _devs.find(src_id); it != _devs.end())
+    {
+      spdlog::debug("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&it->second->_wait_for_pkt_id));
+      if(it->second->_wait_for_pkt_id == pkt_id)
+      {
+        spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
+        it->second->_wait_for_pkt_id = VESC::InvalidPktId;
+        it->second->_promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
+        return true;
+      }
+    }
     spdlog::debug("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
     return false;
   }
@@ -290,7 +309,7 @@ void VESCpp::processShortBufferCB(comm::CAN* can, const comm::CAN::Id can_id, co
     b[i] = data[i+2];
 
   if(!processRawPacket(can, src_id, b, 0, pkt_len))
-    spdlog::error("[VESCpp::processShortBufferCB][{}<={}] Could not process Short Packet {}", id, src_id, tgt_id, pkt_id);
+    spdlog::error("[VESCpp::processShortBufferCB][{}<={}] Could not process Short Packet {}", id, src_id,  pkt_id);
 }
 
 void VESCpp::fillRXBufferCB(comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)

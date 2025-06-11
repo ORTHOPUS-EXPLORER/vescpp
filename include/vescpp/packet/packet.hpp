@@ -28,4 +28,18 @@ namespace vescpp::VESC
       const size_t _payload_length_min,
                    _payload_length_max;
   };
+
+  class RawPacket
+    : public Packet
+  {
+  public:
+    RawPacket(PktId id, size_t len_min, size_t len_max=0);
+    RawPacket(PktId id, const DataBuffer& data);
+    RawPacket(PktId id, const DataBuffer& data, size_t start, size_t len);
+
+    bool encode_payload(DataBuffer& buf, size_t start=0, size_t max_len=0) override;
+    bool decode_payload(const DataBuffer& buf, size_t start=0, size_t len=0) override;
+
+    DataBuffer  data;
+  };
 }

@@ -55,10 +55,24 @@ public:
     return nullptr;
   }
 
+  std::shared_ptr<vescpp::VESC::RawPacket> waitFor(VESC::PktId pkt_id, const std::chrono::milliseconds& timeout=_defaultTimeout)
+  {
+    _promise = {};
+    _wait_for_pkt_id = pkt_id;
+    spdlog::trace("Start waiting for packet ID: {}/{}", _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
+    auto f = _promise.get_future();
+    if(f.wait_for(timeout) == std::future_status::ready)
+    {
+        return std::dynamic_pointer_cast<vescpp::VESC::RawPacket>(f.get());
+    }
+    return nullptr;
+  }
+
   const VESC::BoardId id;
-private:
-  VESC::PktId _wait_for_pkt_id = VESC::InvalidPktId;
+//private:
+//protected:
   std::promise<std::shared_ptr<VESC::Packet>> _promise;
+  VESC::PktId _wait_for_pkt_id = VESC::InvalidPktId;
 protected:
   VESCpp* _host;
 
