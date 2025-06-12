@@ -2,7 +2,10 @@
 
 #include "vescpp/vescpp.hpp"
 
+extern "C"
+{
 #include "heatshrink_encoder.h"
+}
 
 using namespace std::chrono_literals;
 
@@ -71,6 +74,7 @@ bool VESCTarget::sendCmd(const std::string_view& cmd, std::chrono::milliseconds 
 }
 
 bool readHex(const std::string& hex_filename, std::map<uint32_t, std::vector<uint8_t>>& hex_data);
+bool readBin(const std::string& bin_filename, std::vector<uint8_t>& bin_data);
 
 
 bool VESCTarget::eraseFirmware(bool isBootloader, bool fwdCan, bool isLzo, std::chrono::milliseconds delay_after_send, size_t fwSize)
@@ -87,7 +91,11 @@ bool VESCTarget::eraseFirmware(bool isBootloader, bool fwdCan, bool isLzo, std::
   else
   {
     const auto id = fwdCan ? ::VESC::COMM_ERASE_NEW_APP_ALL_CAN : ::VESC::COMM_ERASE_NEW_APP;
-    auto pkt = vescpp::VESC::RawPacket(id,{fwSize});
+    auto pkt = vescpp::VESC::RawPacket(id,{});
+    pkt.data.push_back((fwSize >>24)& 0xFF);
+    pkt.data.push_back((fwSize >>16)& 0xFF);
+    pkt.data.push_back((fwSize >> 8)& 0xFF);
+    pkt.data.push_back((fwSize     )& 0xFF);
     this->send(pkt);
   }
   if(auto pkt = this->waitFor(expect_id, 20s))
@@ -107,18 +115,34 @@ bool VESCTarget::eraseFirmware(bool isBootloader, bool fwdCan, bool isLzo, std::
 
 bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bool fwdCan, bool isLzo)
 {
-  std::map<uint32_t, std::vector<uint8_t>> hex_data;
-  if(!readHex(fw_file,hex_data))
-  {
-    spdlog::error("Can't read Hex file {:s}", fw_file);
-    return false;
-  }
   size_t fwSize=0;
+  std::vector<uint8_t> fwData;
   uint32_t fwOffset = 0;
-  for(const auto& [addr, data]: hex_data)
+  uint32_t addr = 0;
+  if(false)
   {
-    fwSize += data.size();
-    spdlog::debug("Addr {:08X}, Data {:8d}", addr, data.size());//spdlog::to_hex(data));
+    std::map<uint32_t, std::vector<uint8_t>> hex_data;
+    if(!readHex(fw_file,hex_data))
+    {
+      spdlog::error("Can't read Hex file {:s}", fw_file);
+      return false;
+    }
+    for(const auto& [addr, data]: hex_data)
+    {
+      fwSize += data.size();
+      fwData.insert(fwData.end(), data.begin(), data.end());
+
+      spdlog::debug("Addr {:08X}, Data {:8d}", addr, data.size());//spdlog::to_hex(data));
+    }
+  }
+  else
+  {
+    if(!readBin(fw_file,fwData))
+    {
+      spdlog::error("Can't read bin file {:s}", fw_file);
+      return false;
+    }
+    fwSize = fwData.size();
   }
 
   // FIXME: Support all hardware
@@ -136,6 +160,7 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
   }
 
   // FIXME: Support LZO
+  bool supportLzo = false;
   if(isLzo)
   {
     spdlog::error("Compressed flash is not currently supported. Abort");
@@ -148,7 +173,7 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
     switch(fw()->hw_type_vesc)
     {
       case ::VESC::HW_TYPE_VESC:
-        fwOffset = 0x60000; // 1024*128*3 (BL is in FLASH_SECTOR_7 ?)
+        addr += 0x60000; // 1024*128*3 (BL is in FLASH_SECTOR_7 ?)
         break;
       default:
         // FIXME: Support all hardware
@@ -157,6 +182,7 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
     spdlog::error("Bootloader flash is not currently supported. Abort");
     return false;
   }
+
   spdlog::debug("Erase firmware");
   if(!this->eraseFirmware(isBootloader, fwdCan, isLzo, 1s, fwSize))
   {
@@ -164,12 +190,137 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
     return false;
   }
   
-  spdlog::debug("Send new firmware");
-  size_t startAddr = fwOffset;
+  spdlog::debug("Send new firmware, file: {:s}, size {:d}, offset 0x{:08x}",fw_file, fwSize, fwOffset);
+  size_t startAddr = addr;
+  bool useHS = false;
+  if (fwSize > 393208 && fwSize < 700000) 
+  {
+    useHS = true;
+    spdlog::debug("Firmware is quite big, compress it first !");
+    heatshrink_encoder hse;
+    heatshrink_encoder_reset(&hse);
+    size_t hsSize = fwSize + fwSize/2 + 4; // Wut ?
+    std::vector<uint8_t> fwDataHS; fwDataHS.resize(hsSize);
+    size_t sunk = 0,
+           count = 0,
+           fwSizeHS = 0;
+    while(sunk < fwSize)
+    {
+      heatshrink_encoder_sink(&hse, &fwData[sunk], fwSize-sunk, &count);
+      sunk += count;
+      if (sunk == fwSize)
+        heatshrink_encoder_finish(&hse);
+
+      HSE_poll_res pres;
+      do 
+      {
+          pres = heatshrink_encoder_poll(&hse, &fwDataHS[fwSizeHS], hsSize-fwSizeHS, &count);
+          fwSizeHS += count;
+      } while (pres == HSER_POLL_MORE);
+
+      if (sunk == fwSize)
+          heatshrink_encoder_finish(&hse);
+    }
+    fwDataHS.resize(fwSizeHS);
+
+    supportLzo = false;
+    const auto fwSizeOrig = fwSize;
+    const auto fwDataOrig = std::move(fwData);
+    fwSize = fwSizeHS;
+    fwData = std::move(fwDataHS);
+
+    spdlog::debug("Firmware heatshrunk from {:d} to {:d} bytes ({:.2f}%)",fwSizeOrig, fwSize, (100.0*fwSize/fwSizeOrig));
+    if(fwSize > 393208)
+    {
+       spdlog::error("Heatshrunk firmware is still too big! Abort");
+       return false;
+    }
+  }
+  
+  if(!isBootloader)
+  {
+    // uint16_t crc16(const vescpp::DataBuffer& buf, size_t start=0, size_t len=0);
+    auto fwCRC = ::VESC::crc16(fwData);
+    std::vector<uint8_t> fwHeader;
+    uint32_t shift = fwSize;
+    if(useHS)
+      shift |= 0xCC<<24;
+
+    fwHeader.push_back((shift >> 24)&0xFF);
+    fwHeader.push_back((shift >> 16)&0xFF);
+    fwHeader.push_back((shift >> 8)&0xFF);
+    fwHeader.push_back(shift&0xFF);
+    fwHeader.push_back(fwCRC >> 8);
+    fwHeader.push_back(fwCRC&0xFF);
+    spdlog::debug("Size: {:d}/{:d}, 0x{:06x} CRC: 0x{:04x}, fwHeader: {:np}", fwSize, fwData.size(), fwSize, fwCRC, spdlog::to_hex(fwHeader));
+    fwData.insert(fwData.begin(),fwHeader.begin(),fwHeader.end());
+    fwSize = fwData.size();
+  }
+
+  size_t index=0;
+  const auto chunkSz = 384;
+  while(index < fwSize)
+  {
+    const auto sz = fwSize-index > chunkSz ? chunkSz : fwSize-index;
+    std::vector<uint8_t> data; data.insert(data.begin(), fwData.begin()+index, fwData.begin()+index+sz);
+    //spdlog::trace("[{}/{}][0x{:08X}] Send {:d} bytes...", index, fwSize, addr, sz);//, spdlog::to_hex(data));
+    bool hasData = false;
+    for(const auto v: data)
+    {
+      if(v != 0xFF)
+      {
+        hasData = true;
+        break;
+      }
+    }
+
+    int res = 1;
+    if(hasData)
+    {
+      const auto maxSz  = chunkSz + chunkSz/16 + 64 + 3; // Wuuut ?
+      if(isLzo && supportLzo)
+      {
+        // FIXME: Support LZO
+        spdlog::error("LSO not supported. Abort");
+        return false;
+      }
+      else
+      {
+        // FIXME: Support all hardware
+        const auto id = fwdCan ? ::VESC::COMM_WRITE_NEW_APP_DATA_ALL_CAN : ::VESC::COMM_WRITE_NEW_APP_DATA;
+        auto pkt = vescpp::VESC::RawPacket(id,{});
+        auto& pdata = pkt.data;
+        pdata.push_back((addr >> 24)&0xFF);
+        pdata.push_back((addr >> 16)&0xFF);
+        pdata.push_back((addr >> 8)&0xFF);
+        pdata.push_back( addr&0xFF);
+        pdata.insert(pdata.end(),data.begin(), data.end());
+        this->send(pkt);
+        bool offset = 0x0;
+        if(auto pkt = this->waitFor(::VESC::COMM_WRITE_NEW_APP_DATA, 1s))
+        {
+          if(pkt->data.size() < 1 || pkt->data[0] != 1)
+          {
+            spdlog::error("[{}/{}] Chunk Write failed", index, fwSize, addr);
+            return false;
+          }
+          spdlog::trace("[{}/{}] Chunk Write OK at addr 0x{:08x}", index, fwSize, addr);
+        }
+        else
+        {
+          spdlog::error("[{}/{}] Chunk Write timeout", index, fwSize, addr);
+          return false;
+        }
+      }
+    }
+    addr += sz;
+    index += sz;
+    //break;
+  }
 
   if(!isBootloader)
   {
-    spdlog::debug("Jump to Bootloader");
+    spdlog::info("Jump to Bootloader");
     // FIXME: Support all hardware
     const auto id = fwdCan ? ::VESC::COMM_JUMP_TO_BOOTLOADER_ALL_CAN : ::VESC::COMM_JUMP_TO_BOOTLOADER;
     auto pkt = vescpp::VESC::RawPacket(id,{});
@@ -179,6 +330,15 @@ bool VESCTarget::flashFirmware(const std::string& fw_file, bool isBootloader, bo
 
   return true;
 }
+
+
+bool readBin(const std::string& bin_filename, std::vector<uint8_t>& bin_data)
+{
+  std::ifstream bin_file(bin_filename, std::ios::binary);
+  bin_data = std::vector<uint8_t>(std::istreambuf_iterator<char>(bin_file), {});
+  return true;
+}
+
 
 // Intentional breaks
 // Addr                   size    , name
