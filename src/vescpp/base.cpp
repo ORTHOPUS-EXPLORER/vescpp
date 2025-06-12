@@ -158,7 +158,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
-    spdlog::debug("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
+    spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
     if(_wait_for_pkt_id == pkt_id)
     {
       spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
@@ -168,7 +168,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
     }
     if(auto it = _devs.find(src_id); it != _devs.end())
     {
-      spdlog::debug("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&it->second->_wait_for_pkt_id));
+      spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&it->second->_wait_for_pkt_id));
       if(it->second->_wait_for_pkt_id == pkt_id)
       {
         spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
