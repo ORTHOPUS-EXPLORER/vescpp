@@ -1,0 +1,17 @@
+*** ./_deps/heatshrink/src/heatshrink_config.h	2025-06-18 21:42:04.538317717 +0200
+--- ../src/src/3rdparty/heatshrink_config.h	2025-06-12 23:55:23.177061091 +0200
+***************
+*** 6 ****
+! #define HEATSHRINK_DYNAMIC_ALLOC 1
+--- 6 ----
+! #define HEATSHRINK_DYNAMIC_ALLOC 0
+***************
+*** 20 ****
+!     #define HEATSHRINK_STATIC_WINDOW_BITS 8
+--- 20 ----
+!     #define HEATSHRINK_STATIC_WINDOW_BITS 13
+***************
+*** 24 ****
+!     #define HEATSHRINK_STATIC_LOOKAHEAD_BITS 4
+--- 24 ----
+!     #define HEATSHRINK_STATIC_LOOKAHEAD_BITS 5

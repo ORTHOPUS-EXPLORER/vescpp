@@ -47,6 +47,8 @@ if(NOT TARGET heatshrink)
       CMAKE_COMMAND ""
       BUILD_COMMAND ""
       INSTALL_COMMAND ""
+      PATCH_COMMAND patch -p0 ${HEATSHRINK_SRC_DIR}/src/heatshrink_config.h < ${CMAKE_CURRENT_SOURCE_DIR}/src/3rdparty/heatshrink_config.h.patch
+      UPDATE_DISCONNECTED 1
       SOURCE_DIR ${HEATSHRINK_SRC_DIR}
   )
   FetchContent_MakeAvailable(heatshrink_build)
