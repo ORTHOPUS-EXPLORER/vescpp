@@ -46,6 +46,12 @@ public:
     return nullptr;
   }
 
+  void remove_peer(VESC::BoardId board_id)
+  {
+    if(auto it = _devs.find(board_id); it != _devs.end())
+      _devs.erase(it);
+  }
+
   const std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> peers() const
   {
     return _devs;
@@ -59,7 +65,7 @@ public:
     return nullptr;
   }
 
-  void scanCAN(bool add_devices, std::chrono::milliseconds timeout_ms);
+  void scanCAN(bool add_devices, std::chrono::milliseconds scan_timeout_ms, std::chrono::milliseconds ping_timeout_ms=std::chrono::milliseconds::zero());
 
 };
 

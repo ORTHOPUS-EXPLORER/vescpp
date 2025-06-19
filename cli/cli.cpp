@@ -12,10 +12,10 @@ using namespace vescpp;
 using namespace vescpp::VESC;
 
 template <class GetPktT>
-bool writeToFile(const std::string &name, vescpp::VESCTarget &vesc);
+bool writeToFile(const std::string &name, vescpp::VESCTarget &vesc, std::chrono::milliseconds timeout_ms);
 
 template <class GetPktT, class SetPktT>
-bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, bool force = false);
+bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, std::chrono::milliseconds timeout_ms, bool force = false);
 
 int main(int argc, char **argv)
 {
@@ -26,7 +26,10 @@ int main(int argc, char **argv)
        use_single_dev = false;
   unsigned int host_id = 51,
                device_id = 0,
-               exit_delay_ms = 100;
+               conf_timeout_ms = 250,
+               ping_timeout_ms = 50,
+               scan_timeout_ms = 100,
+               exit_delay_ms   = 100;
   std::string can_port = "can0",
               cmd = "",
               conf_type = "",
@@ -40,7 +43,10 @@ int main(int argc, char **argv)
   | lyra::opt(host_id,        "id"   )["-I"]("Host ID (1-254)")
   | lyra::opt(device_id,      "id"   )["-i"]("Device ID (1-254)")
   | lyra::opt(device_uuid,    "uuid" )["-u"]("Device UUID (hex, 12bytes)")
-  | lyra::opt(exit_delay_ms,  "delay")["-x"]("Delay, in ms, after last CAN message before exiting CLI")
+  | lyra::opt(conf_timeout_ms, "conf_timeout")["-c"]("Get timeout, in ms")
+  | lyra::opt(ping_timeout_ms, "ping_timeout")["-p"]("CAN Ping timeout, in ms")
+  | lyra::opt(scan_timeout_ms, "scan_timeout")["-s"]("CAN scan timeout, in ms")
+  | lyra::opt(exit_delay_ms,  "exit_delay")["-x"]("Delay, in ms, after last CAN message before exiting CLI")
   | lyra::opt(force_load             )["-f"]("Force loading config")
   | lyra::opt(use_single_dev         )["-S"]("Use autodetected Device when there's only one on the CAN bus")
   | lyra::opt(conf_dir,       "dir"  )["-D"]("Directory to load/files from")
@@ -81,12 +87,12 @@ int main(int argc, char **argv)
     auto vescpp = vescpp::VESCHost(host_id, &can_comm);
     if(cmd == "scan")
     {
-      vescpp.scanCAN(true, 100ms);
+      vescpp.scanCAN(true, std::chrono::milliseconds(scan_timeout_ms), std::chrono::milliseconds(ping_timeout_ms));
       const auto& peers = vescpp.peers();
       for(const auto& [_, v]: peers)
       {
         const auto& fw = v->fw();
-        spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x {4:spn}", v->id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid));
+        spdlog::info("[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x{4:spn}", v->id, fw->fw_version_major, fw->fw_version_minor,  fw->hw_name.c_str(), spdlog::to_hex(fw->uuid));
       }
       spdlog::debug("OK bye, scan");
       return EXIT_SUCCESS;
@@ -96,10 +102,23 @@ int main(int argc, char **argv)
     // use provided ID
     spdlog::info("[{}][{}] Look for Target ID {}", can_port, host_id, device_id);
     if(device_id > 0)
-      vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, 100ms);
+    {
+      vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, std::chrono::milliseconds(ping_timeout_ms));
+      if(device_uuid.length() && vesc != nullptr && vesc->fw() != nullptr)
+      {
+        const auto duuid = fmt::format("0x{:spn}", spdlog::to_hex(vesc->fw()->uuid));
+        spdlog::info("[{}][{}] Target {} found with UUID {}", can_port, host_id, device_id, duuid);
+        if(duuid != device_uuid)
+        {
+          spdlog::warn("[{}][{}] Target UUID does not match provided UUID, drop device and look for UUID", can_port, host_id, device_id);
+          vescpp.remove_peer(device_id);
+          vesc = nullptr;
+        }
+      }
+    }
     if(!vesc)
     {
-      vescpp.scanCAN(true, 10ms);
+      vescpp.scanCAN(true, std::chrono::milliseconds(scan_timeout_ms), std::chrono::milliseconds(ping_timeout_ms));
       const auto& peers = vescpp.peers();
       // Find with UUID
       if(device_uuid.length())
@@ -117,7 +136,7 @@ int main(int argc, char **argv)
         }
       }
       // Fallback
-      if(!vesc && peers.size() == 1)
+      if(!vesc && peers.size() == 1 && use_single_dev)
       {
         vesc = peers.begin()->second;
         spdlog::info("[{}][{}] Fallback to the only connected device: {}", can_port, host_id, vesc->id);
@@ -126,7 +145,7 @@ int main(int argc, char **argv)
 
     if(!vesc)
     {
-      spdlog::error("Can't find device with ID '{}' or UUID '{}'. Abort", device_id, device_uuid);
+      spdlog::error("Can't find device with ID '{}' and UUID '{}'. Abort", device_id, device_uuid);
       return EXIT_FAILURE;
     }
 
@@ -167,11 +186,11 @@ int main(int argc, char **argv)
         conf_file = conf_dir+"/"+conf_file;
 
       spdlog::info("Loading Config from {}", conf_file);
-      if (conf_type == "app" && loadFromFile<packets::GetAppConf, packets::SetAppConf>(conf_file, *vesc, force_load))
+      if (conf_type == "app" && loadFromFile<packets::GetAppConf, packets::SetAppConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms), force_load))
         spdlog::info("Loaded App config to {}", conf_file);
-      else if (conf_type == "motor" && loadFromFile<packets::GetMCConf, packets::SetMCConf>(conf_file, *vesc, force_load))
+      else if (conf_type == "motor" && loadFromFile<packets::GetMCConf, packets::SetMCConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms), force_load))
         spdlog::info("Loaded Motor config to {}", conf_file);
-      else if (conf_type == "custom" && loadFromFile<packets::GetCustomConf, packets::SetCustomConf>(conf_file, *vesc, force_load))
+      else if (conf_type == "custom" && loadFromFile<packets::GetCustomConf, packets::SetCustomConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms), force_load))
         spdlog::info("Loaded Custom config to {}", conf_file);
     }
     else if (cmd == "save_conf")
@@ -190,11 +209,11 @@ int main(int argc, char **argv)
         conf_file = conf_dir+"/"+conf_file;
       }
 
-      if (conf_type == "app" && writeToFile<packets::GetAppConf>(conf_file, *vesc))
+      if (conf_type == "app" && writeToFile<packets::GetAppConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms)))
         spdlog::info("Saved App config to {}", conf_file);
-      else if (conf_type == "motor" && writeToFile<packets::GetMCConf>(conf_file, *vesc))
+      else if (conf_type == "motor" && writeToFile<packets::GetMCConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms)))
         spdlog::info("Saved Motor config to {}", conf_file);
-      else if (conf_type == "custom" && writeToFile<packets::GetCustomConf>(conf_file, *vesc))
+      else if (conf_type == "custom" && writeToFile<packets::GetCustomConf>(conf_file, *vesc, std::chrono::milliseconds(conf_timeout_ms)))
         spdlog::info("Saved Custom config to {}", conf_file);
     }
     else if (cmd == "flash_fw")
@@ -232,9 +251,9 @@ int main(int argc, char **argv)
 }
 
 template <class GetPktT>
-bool writeToFile(const std::string &name, vescpp::VESCTarget &vesc)
+bool writeToFile(const std::string &name, vescpp::VESCTarget &vesc, std::chrono::milliseconds timeout_ms)
 {
-  if (auto cnf = vesc.request<GetPktT>(200ms))
+  if (auto cnf = vesc.request<GetPktT>(timeout_ms))
   {
     spdlog::info("Saving Config to {}", name);
     json j;
@@ -249,7 +268,7 @@ bool writeToFile(const std::string &name, vescpp::VESCTarget &vesc)
 }
 
 template <class GetPktT, class SetPktT>
-bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, bool force)
+bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, std::chrono::milliseconds timeout_ms, bool force)
 {
   SetPktT spkt;
   std::ifstream ifile(name);
@@ -274,7 +293,7 @@ bool loadFromFile(const std::string &name, vescpp::VESCTarget &vesc, bool force)
   }
 
   // Get current conf to match signature
-  if (auto gpkt = vesc.request<GetPktT>(200ms))
+  if (auto gpkt = vesc.request<GetPktT>(timeout_ms))
   {
     if (gpkt->signature != spkt.signature)
     {
