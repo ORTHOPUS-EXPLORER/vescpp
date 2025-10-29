@@ -180,7 +180,7 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
     spdlog::debug("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
     return false;
   }
-  spdlog::trace("Created packet for ID: {}, {}", pkt_id, fmt::ptr(pkt));
+  spdlog::trace("Created packet for ID: {}, {}", pkt_id, fmt::ptr(pkt.get()));
   bool r = pktProcess(comm, src_id, pkt);
   if(!r)
     spdlog::error("[VESCpp::processRawPacket][{}<={}] Could not process Packet with ID: {}", id, src_id, pkt_id);
