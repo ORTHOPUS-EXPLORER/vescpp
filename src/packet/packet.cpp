@@ -16,7 +16,7 @@ Packet::Packet(PktId id, size_t len_min, size_t len_max)
 
 nlohmann::json Packet::toJson() const
 {
-  spdlog::error("[Packet::toJson][{}] Unhandled conversion to JSON", id);
+  spdlog::error("[Packet::toJson][{:d}] Unhandled conversion to JSON", id);
   return {};
 }
 

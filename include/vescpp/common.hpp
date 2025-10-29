@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 
+#include <fmt/std.h>
 #include "spdlog/spdlog.h"
 #include "spdlog/cfg/env.h"
 #include "spdlog/fmt/bin_to_hex.h"
@@ -22,5 +23,23 @@ namespace vescpp
   using DataBuffer = std::vector<uint8_t>;
   using Time = std::chrono::system_clock;
 }
+
+template<>
+struct fmt::formatter<vescpp::VESC::PktId> : fmt::formatter<std::string>
+{
+    auto format(vescpp::VESC::PktId v, format_context &ctx) const -> decltype(ctx.out())
+    {
+        return fmt::format_to(ctx.out(), "{:d}", (uint8_t)v);
+    }
+};
+
+template<>
+struct fmt::formatter<vescpp::VESC::HwTypeId> : fmt::formatter<std::string>
+{
+    auto format(vescpp::VESC::HwTypeId v, format_context &ctx) const -> decltype(ctx.out())
+    {
+        return fmt::format_to(ctx.out(), "{:d}", (uint8_t)v);
+    }
+};
 
 #include "vescpp/vesc/utils.hpp"

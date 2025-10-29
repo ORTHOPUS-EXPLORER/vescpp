@@ -7,17 +7,17 @@ option(VESCPP_BUILD_TESTS   "Build unittests"           ON)
 include(FetchContent)
 set(EXT_PKGS)
 if(NOT TARGET spdlog::spdlog)
-  find_package(spdlog 1.9.2 REQUIRED)
+  #find_package(spdlog 1.15.2 REQUIRED)
   FetchContent_Declare(spdlog
     GIT_REPOSITORY  https://github.com/gabime/spdlog
-    GIT_TAG         v1.9.2
+    GIT_TAG         v1.15.3
     GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
-    FIND_PACKAGE_ARGS 1.9.2
+    FIND_PACKAGE_ARGS 1.15.2
   )
   FetchContent_MakeAvailable(spdlog)
 
   if(NOT spdlog_FOUND)
-    message(STATUS "[+] Use FetchContent to get spdlog v1.9.2")
+    message(STATUS "[+] Use FetchContent to get spdlog v1.15.3")
   else()
     message(STATUS "[+] Use System-provided spdlog ${spdlog_VERSION}")
   endif()
