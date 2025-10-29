@@ -7,35 +7,49 @@ option(VESCPP_BUILD_TESTS   "Build unittests"           ON)
 include(FetchContent)
 set(EXT_PKGS)
 if(NOT TARGET spdlog::spdlog)
-  #find_package(spdlog 1.15.2 REQUIRED)
-  FetchContent_Declare(spdlog
-    GIT_REPOSITORY  https://github.com/gabime/spdlog
-    GIT_TAG         v1.15.3
-    GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
-    FIND_PACKAGE_ARGS 1.15.2
-  )
-  FetchContent_MakeAvailable(spdlog)
+  if(CMAKE_VERSION VERSION_LESS 3.25)
+    find_package(spdlog QUIET)
+  endif()
 
   if(NOT spdlog_FOUND)
-    message(STATUS "[+] Use FetchContent to get spdlog v1.15.3")
+    set(SPDLOG_VER 1.15.2)
+    FetchContent_Declare(spdlog
+      GIT_REPOSITORY  https://github.com/gabime/spdlog
+      GIT_TAG         v${SPDLOG_VER}
+      GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
+      FIND_PACKAGE_ARGS
+    )
+    FetchContent_MakeAvailable(spdlog)
+  endif()
+  if(NOT spdlog_FOUND)
+    message(STATUS "[+] Used FetchContent to get spdlog v${SPDLOG_VER}")
   else()
     message(STATUS "[+] Use System-provided spdlog ${spdlog_VERSION}")
   endif()
 endif()
+
 if(NOT TARGET nlohmann_json::nlohmann_json)
-  FetchContent_Declare(nlohmann_json
-    GIT_REPOSITORY  https://github.com/nlohmann/json
-    GIT_TAG         v3.10.5
-    GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
-    FIND_PACKAGE_ARGS 3.10.5
-  )
-  FetchContent_MakeAvailable(nlohmann_json)
+  if(CMAKE_VERSION VERSION_LESS 3.25)
+    find_package(nlohmann_json QUIET)
+  endif()
+
   if(NOT nlohmann_json_FOUND)
-    message(STATUS "[+] Use FetchContent to get nlohmann_json v3.10.5")
+    set(NJSON_VER 3.10.5)
+    FetchContent_Declare(nlohmann_json
+      GIT_REPOSITORY  https://github.com/nlohmann/json
+      GIT_TAG         v${NJSON_VER}
+      GIT_PROGRESS TRUE  GIT_SHALLOW TRUE
+      FIND_PACKAGE_ARGS
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+  endif()
+  if(NOT nlohmann_json_FOUND)
+    message(STATUS "[+] Use FetchContent to get nlohmann_json v${NJSON_VER}")
   else()
     message(STATUS "[+] Use System-provided nlohmann_json ${nlohmann_json_VERSION}")
   endif()
 endif()
+
 if(NOT TARGET heatshrink)
     set(HEATSHRINK_SRC_DIR ${CMAKE_BINARY_DIR}/_deps/heatshrink)
     FetchContent_Declare(heatshrink_build

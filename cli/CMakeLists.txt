@@ -1,9 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
 project(vescpp_cli)
 
-find_package(spdlog REQUIRED)
-find_package(lyra REQUIRED)
-find_package(nlohmann_json REQUIRED)
+if(NOT TARGET spdlog)
+  find_package(spdlog REQUIRED)
+endif()
+if(NOT TARGET lyra)
+  find_package(lyra REQUIRED)
+endif()
+if(NOT TARGET nlohmann_json::nlohmann_json)
+  find_package(nlohmann_json REQUIRED)
+endif()
 
 # VESCpp CLI
 add_executable(${PROJECT_NAME}
