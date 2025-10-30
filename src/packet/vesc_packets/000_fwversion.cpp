@@ -70,17 +70,18 @@ bool FwVersion::decode_payload(const DataBuffer& buf, size_t start, size_t len)
 
     fw_version_major = buf[idx++];
     fw_version_minor = buf[idx++];
-    hw_name.resize(name_len);
+    std::string s(name_len,'\0');
     for(size_t i=0;i<name_len;i++)
     {
-        hw_name[i] = buf[idx++];
-        if(hw_name[i] == '\0')
+        s[i] = buf[idx++];
+        if(s[i] == '\0')
         {
             name_len = i;
             break;
         }
     }
-    hw_name.resize(name_len);
+    s.resize(name_len);
+    hw_name.swap(s);
     for(auto& c: uuid)
         c = buf[idx++];
     pairing_done = buf[idx++] == 0x01 ? true : false;
