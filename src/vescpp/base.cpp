@@ -22,9 +22,9 @@ bool VESCBase::sendRequest(VESC::Packet& pkt)
   return _host ? _host->send(nullptr, id, pkt) : false;
 }
 
-bool VESCBase::pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb)
+bool VESCBase::pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb, bool replace)
 {
-  if(_pkt_handlers.find(pkt_id) == _pkt_handlers.end())
+  if(_pkt_handlers.find(pkt_id) == _pkt_handlers.end() || replace)
   {
     //spdlog::debug("[VESCBase][{}] Add Handler for Packet {}", id, pkt_id);
     _pkt_handlers[pkt_id] = cb;

@@ -21,7 +21,7 @@ public:
 
   using pkt_handler_cb_t = std::function<bool(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)>;
 
-  bool pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb);
+  bool pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb, bool replace=false);
 
   virtual bool pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt);
 
