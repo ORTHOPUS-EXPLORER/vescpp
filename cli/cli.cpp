@@ -103,7 +103,7 @@ int main(int argc, char **argv)
     spdlog::info("[{}][{}] Look for Target ID {}", can_port, host_id, device_id);
     if(device_id > 0)
     {
-      vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, std::chrono::milliseconds(ping_timeout_ms));
+      vesc = vescpp.add_peer(device_id, ::VESC::HW_TYPE_VESC, true, std::chrono::milliseconds(ping_timeout_ms));
       if(device_uuid.length() && vesc != nullptr && vesc->fw() != nullptr)
       {
         const auto duuid = fmt::format("0x{:spn}", spdlog::to_hex(vesc->fw()->uuid));
