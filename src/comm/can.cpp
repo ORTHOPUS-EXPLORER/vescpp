@@ -196,7 +196,7 @@ static void* _thread_task(void* arg)
     if (!select(sock->_sock_fd + 1, &descriptors, nullptr, nullptr, &timeout))
       continue;
     can_frame rx_frame{};
-    if(size_t len = read(sock->_sock_fd, &rx_frame, CAN_MTU); len < 0)
+    if(read(sock->_sock_fd, &rx_frame, CAN_MTU) < 0)
       continue;
     sock->_rx_cb(rx_frame);
   }
