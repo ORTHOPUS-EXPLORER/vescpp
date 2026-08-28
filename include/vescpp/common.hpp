@@ -17,7 +17,7 @@ namespace vescpp
     constexpr BoardId InvalidBoardId = 0x00;
     using HwTypeId = ::VESC::HW_TYPE;
     using PktId = ::VESC::COMM_PACKET_ID;
-    constexpr PktId InvalidPktId = (::VESC::COMM_PACKET_ID)0xFFF;
+    constexpr PktId InvalidPktId = (::VESC::COMM_PACKET_ID)0xFF;
   }
 
   using DataBuffer = std::vector<uint8_t>;
