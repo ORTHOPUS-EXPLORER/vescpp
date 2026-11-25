@@ -291,11 +291,11 @@ void VESCpp::scanCAN(std::chrono::milliseconds timeout_ms, std::function<void(VE
     return;
   spdlog::trace("[{}] Scan CAN bus for VESC boards", id);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> out;
-  Time::time_point last_pong_time=Time::now();
+  std::atomic<Time::time_point> last_pong_time{Time::now()}; // Written from the CAN RX thread
   auto hdlr_id = can->addHandler((::VESC::CAN_PACKET_PONG<<8)|id,
     [this, &last_pong_time, &cb](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
     {
-      last_pong_time = Time::now();
+      last_pong_time.store(Time::now());
       spdlog::debug("[{}] Got CAN PONG: {:pn}", id, spdlog::to_hex(data, data+len));
       if(cb)
         cb((VESC::BoardId)(data[0]), (VESC::HwTypeId)(data[1]));
@@ -313,9 +313,10 @@ void VESCpp::scanCAN(std::chrono::milliseconds timeout_ms, std::function<void(VE
   }
   spdlog::trace("[{}] Done sending PINGs", id);
 
-  while (Time::now()-last_pong_time < timeout_ms)
+  while (Time::now()-last_pong_time.load() < timeout_ms)
     std::this_thread::sleep_for(1ms);
   spdlog::trace("[{}] Done scanning CAN bus for VESC boards", id);
+  // Once removed, the handler can't run anymore: safe to leave this scope (it uses local variables)
   can->removeHandler(hdlr_id);
 }
 
