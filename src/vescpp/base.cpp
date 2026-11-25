@@ -122,6 +122,31 @@ std::chrono::milliseconds VESCpp::msSinceLastVESCkt() const
   return std::chrono::duration_cast<std::chrono::milliseconds>(Time::now() - _last_pkt_t);
 }
 
+std::shared_ptr<VESCTarget> VESCpp::getDevice(VESC::BoardId board_id) const
+{
+  std::lock_guard lock(_devs_mutex);
+  const auto it = _devs.find(board_id);
+  return it != _devs.end() ? it->second : nullptr;
+}
+
+std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> VESCpp::getDevices() const
+{
+  std::lock_guard lock(_devs_mutex);
+  return _devs;
+}
+
+void VESCpp::setDevice(VESC::BoardId board_id, std::shared_ptr<VESCTarget> dev)
+{
+  std::lock_guard lock(_devs_mutex);
+  _devs[board_id] = std::move(dev);
+}
+
+void VESCpp::removeDevice(VESC::BoardId board_id)
+{
+  std::lock_guard lock(_devs_mutex);
+  _devs.erase(board_id);
+}
+
 bool VESCpp::send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd)
 {
   if(!comm)
@@ -140,10 +165,10 @@ bool VESCpp::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<
     return true;
   }
 
-  if(auto it = _devs.find(src_id); it != _devs.end())
+  if(auto dev = getDevice(src_id))
   {
     spdlog::trace("[VESCpp::pktProcess][{}<={}] Forward to device {}", id, src_id, pkt->id);
-    return it->second->pktProcess(comm, src_id, pkt);
+    return dev->pktProcess(comm, src_id, pkt);
   }
 
   spdlog::debug("[VESCpp::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
@@ -172,14 +197,14 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
       _promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
       return true;
     }
-    if(auto it = _devs.find(src_id); it != _devs.end())
+    if(auto dev = getDevice(src_id))
     {
-      spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&it->second->_wait_for_pkt_id));
-      if(it->second->_wait_for_pkt_id == pkt_id)
+      spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&dev->_wait_for_pkt_id));
+      if(dev->_wait_for_pkt_id == pkt_id)
       {
         spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
-        it->second->_wait_for_pkt_id = VESC::InvalidPktId;
-        it->second->_promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
+        dev->_wait_for_pkt_id = VESC::InvalidPktId;
+        dev->_promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
         return true;
       }
     }

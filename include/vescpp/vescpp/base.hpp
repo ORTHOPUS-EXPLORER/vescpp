@@ -2,6 +2,8 @@
 #include <map>
 #include <chrono>
 #include <future>
+#include <memory>
+#include <mutex>
 
 #include "vescpp/common.hpp"
 #include "vescpp/comm/can.hpp"
@@ -121,13 +123,23 @@ public:
   std::chrono::milliseconds msSinceLastCANPkt() const;
   std::chrono::milliseconds msSinceLastVESCkt() const;
 
-  std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> _devs;
+  // Devices are used from several threads (CAN RX, TX, user): only access them with these methods.
+  // Returned devices stay valid even if they are removed meanwhile by another thread.
+  [[nodiscard]] std::shared_ptr<VESCTarget> getDevice(VESC::BoardId board_id) const;
+  [[nodiscard]] std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> getDevices() const;
   protected:
+  void setDevice(VESC::BoardId board_id, std::shared_ptr<VESCTarget> dev);
+  void removeDevice(VESC::BoardId board_id);
+
   Comm* const _comm;
 
   static constexpr std::chrono::microseconds _tx_delay_us{10};
 
 private:
+  // Never hold the mutex while calling a device method or writing on CAN
+  mutable std::mutex _devs_mutex;
+  std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> _devs;
+
   Time::time_point _last_can_t, _last_pkt_t;
   // CAN
   // Callbacks
