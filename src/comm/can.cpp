@@ -53,12 +53,15 @@ void CAN::canRXcb(const can_frame& frame)
   if (!handled)
   {
     bool handleable = false;
-    for (const auto& v : _vescpp)  // FIXME: Figure out if we keep this or not
     {
-      if (v.first == (can_id & 0xFF))
+      std::lock_guard lock(_vescpp_mutex);
+      for (const auto& v : _vescpp)  // FIXME: Figure out if we keep this or not
       {
-        handleable = true;
-        break;
+        if (v.first == (can_id & 0xFF))
+        {
+          handleable = true;
+          break;
+        }
       }
     }
     if (handleable)

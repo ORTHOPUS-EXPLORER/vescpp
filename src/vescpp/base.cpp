@@ -86,7 +86,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
   //_fw->hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
   //_fw->custom_config = 0x00;
 
-  _comm->_vescpp[id] = this; // FIXME: Figure out if we keep this or not
+  _comm->registerVESCpp(id, this); // FIXME: Figure out if we keep this or not
 
   spdlog::debug("[{}] New VESCpp instance", id);
   if(auto* _can = dynamic_cast<comm::CAN*>(comm))
