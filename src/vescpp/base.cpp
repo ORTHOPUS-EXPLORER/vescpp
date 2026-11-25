@@ -1,5 +1,7 @@
 #include "vescpp/vescpp.hpp"
 
+#include <utility>
+
 using namespace std::chrono_literals;
 
 namespace vescpp
@@ -35,31 +37,65 @@ bool VESCBase::pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb, bool repla
 
 bool VESCBase::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)
 {
-  // Is a thread blocked in waitFor() for this type of packet?
-  // Note: pkt->id is the packet type (e.g. COMM_FW_VERSION), not a unique packet number
-  const bool waiting = (_wait_for_pkt_id == pkt->id);
-  bool result = waiting;
-
   // Run the handler registered for this type of packet, if any
-  if(_pkt_handlers.find(pkt->id) != _pkt_handlers.end())
+  const bool has_handler = _pkt_handlers.find(pkt->id) != _pkt_handlers.end();
+  bool result = false;
+  if(has_handler)
   {
     spdlog::trace("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
     result = _pkt_handlers[pkt->id](comm, src_id, pkt);
   }
 
-  // Give the packet to the waiting thread. Must stay after the handler: the thread resumes
-  // immediately and may use what the handler stores (e.g. VESCTarget::_fw)
-  if(waiting)
+  // Give the packet to the thread waiting for this type of packet, if any. Must stay after the
+  // handler: the thread resumes immediately and may use what the handler stores (e.g. VESCTarget::_fw)
+  // Note: pkt->id is the packet type (e.g. COMM_FW_VERSION)
+  if(notifyWait(pkt->id, pkt))
   {
     spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
-    _wait_for_pkt_id = VESC::InvalidPktId;
-    _promise.set_value(pkt);
+    // The handler has the last word on the result
+    if(!has_handler)
+      result = true;
   }
 
   // Nobody was interested in this packet (only debug log if this is a Device)
   if(_host && !result)
     spdlog::debug("[VESCBase::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
   return result;
+}
+
+
+void VESCBase::startWait(VESC::PktId pkt_id)
+{
+  std::lock_guard lock(_wait_mutex);
+  _wait_reply = nullptr;
+  _wait_for_pkt_id = pkt_id;
+}
+
+void VESCBase::cancelWait()
+{
+  std::lock_guard lock(_wait_mutex);
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  _wait_reply = nullptr;
+}
+
+std::shared_ptr<VESC::Packet> VESCBase::endWait(const std::chrono::milliseconds& timeout)
+{
+  std::unique_lock lock(_wait_mutex);
+  _wait_cv.wait_for(lock, timeout, [this]() { return _wait_reply != nullptr; });
+  // On timeout, stop waiting: a late reply is ignored (unless the same type is requested again)
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  return std::exchange(_wait_reply, nullptr);
+}
+
+bool VESCBase::notifyWait(VESC::PktId pkt_id, const std::shared_ptr<VESC::Packet>& pkt)
+{
+  std::lock_guard lock(_wait_mutex);
+  if(pkt_id == VESC::InvalidPktId || _wait_for_pkt_id != pkt_id)
+    return false;
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  _wait_reply = pkt;
+  _wait_cv.notify_all();
+  return true;
 }
 
 
@@ -189,24 +225,16 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
-    spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
-    if(_wait_for_pkt_id == pkt_id)
+    // No Packet object could be created: either this type has no dedicated class or decoding failed.
+    // A thread may still be waiting for it (see waitFor()), so give it the raw undecoded data:
+    // it's up to that thread to interpret the bytes. If nobody is waiting, the packet is dropped.
+    const auto raw_pkt = std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1);
+    const auto dev = getDevice(src_id);
+    // Try a thread waiting on the host first, then on the device that sent the packet
+    if(notifyWait(pkt_id, raw_pkt) || (dev && dev->notifyWait(pkt_id, raw_pkt)))
     {
       spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
-      _wait_for_pkt_id = VESC::InvalidPktId;
-      _promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
       return true;
-    }
-    if(auto dev = getDevice(src_id))
-    {
-      spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&dev->_wait_for_pkt_id));
-      if(dev->_wait_for_pkt_id == pkt_id)
-      {
-        spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
-        dev->_wait_for_pkt_id = VESC::InvalidPktId;
-        dev->_promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
-        return true;
-      }
     }
     spdlog::debug("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
     return false;
