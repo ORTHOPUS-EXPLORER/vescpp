@@ -29,6 +29,12 @@ void VESCHost::scanCAN(
       if (auto v = this->add_peer(id, typ, true, ping_timeout_ms); v != nullptr)
       {
         const auto& fw = v->fw();
+        // Check if fw var not available
+        if (!fw)
+        {
+          spdlog::warn("[{0}/0x{0:02X}] No FW version available", id);
+          continue;
+        }
         spdlog::debug(
           "[{0}/0x{0:02X}] FW version: {1}.{2} - HW: {3:<15s} - UUID: 0x {4:spn}", id,
           fw->fw_version_major, fw->fw_version_minor, fw->hw_name.c_str(),

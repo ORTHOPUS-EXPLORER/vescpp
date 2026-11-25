@@ -35,25 +35,31 @@ bool VESCBase::pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb, bool repla
 
 bool VESCBase::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)
 {
-  bool r = false;
-  if(_wait_for_pkt_id == pkt->id)
+  // Is a thread blocked in waitFor() for this type of packet?
+  // Note: pkt->id is the packet type (e.g. COMM_FW_VERSION), not a unique packet number
+  const bool waiting = (_wait_for_pkt_id == pkt->id);
+  bool result = waiting;
+
+  // Run the handler registered for this type of packet, if any
+  if(_pkt_handlers.find(pkt->id) != _pkt_handlers.end())
+  {
+    spdlog::trace("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
+    result = _pkt_handlers[pkt->id](comm, src_id, pkt);
+  }
+
+  // Give the packet to the waiting thread. Must stay after the handler: the thread resumes
+  // immediately and may use what the handler stores (e.g. VESCTarget::_fw)
+  if(waiting)
   {
     spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
     _wait_for_pkt_id = VESC::InvalidPktId;
     _promise.set_value(pkt);
-    r = true;
   }
 
-  if(_pkt_handlers.find(pkt->id) != _pkt_handlers.end())
-  {
-    spdlog::trace("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
-    r = _pkt_handlers[pkt->id](comm, src_id, pkt);
-  }
-
-  //Only output debug if this is a Device
-  if(_host && !r)
+  // Nobody was interested in this packet (only debug log if this is a Device)
+  if(_host && !result)
     spdlog::debug("[VESCBase::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
-  return r;
+  return result;
 }
 
 
