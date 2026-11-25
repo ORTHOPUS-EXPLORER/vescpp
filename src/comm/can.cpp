@@ -55,7 +55,7 @@ void CAN::canRXcb(const can_frame& frame)
     bool handleable = false;
     for (const auto& v : _vescpp)  // FIXME: Figure out if we keep this or not
     {
-      if (v.first == can_id & 0xFF)
+      if (v.first == (can_id & 0xFF))
       {
         handleable = true;
         break;
