@@ -1,7 +1,10 @@
 #pragma once
 #include <map>
 #include <chrono>
-#include <future>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
 
 #include "vescpp/common.hpp"
 #include "vescpp/comm/can.hpp"
@@ -35,48 +38,52 @@ public:
   {
     PktT pkt;
     pkt.isRequest = true;
-    if(this->send(pkt))
+    // Start waiting BEFORE sending, otherwise a fast reply could be missed
+    startWait(RPktT::id());
+    if(!this->send(pkt))
     {
-      return waitFor<RPktT>(timeout);
+      cancelWait();
+      return nullptr;
     }
-    return nullptr;
+    return std::dynamic_pointer_cast<RPktT>(endWait(timeout));
   }
 
+  // Wait for a packet received from now on. Use `request` to send a packet and wait for its reply
   template<typename PktT>
   std::shared_ptr<PktT> waitFor(const std::chrono::milliseconds& timeout=_defaultTimeout)
   {
-    _promise = {};
-    _wait_for_pkt_id = PktT::id();
-    auto f = _promise.get_future();
-    if(f.wait_for(timeout) == std::future_status::ready)
-    {
-        return std::dynamic_pointer_cast<PktT>(f.get());
-    }
-    return nullptr;
+    startWait(PktT::id());
+    return std::dynamic_pointer_cast<PktT>(endWait(timeout));
   }
 
   std::shared_ptr<vescpp::VESC::RawPacket> waitFor(VESC::PktId pkt_id, const std::chrono::milliseconds& timeout=_defaultTimeout)
   {
-    _promise = {};
-    _wait_for_pkt_id = pkt_id;
-    spdlog::trace("Start waiting for packet ID: {}/{}", _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
-    auto f = _promise.get_future();
-    if(f.wait_for(timeout) == std::future_status::ready)
-    {
-        return std::dynamic_pointer_cast<vescpp::VESC::RawPacket>(f.get());
-    }
-    return nullptr;
+    startWait(pkt_id);
+    return std::dynamic_pointer_cast<vescpp::VESC::RawPacket>(endWait(timeout));
   }
 
+  // Give the packet to the thread waiting for this type of packet. Returns false if there is none
+  bool notifyWait(VESC::PktId pkt_id, const std::shared_ptr<VESC::Packet>& pkt);
+
   const VESC::BoardId id;
-//private:
-//protected:
-  std::promise<std::shared_ptr<VESC::Packet>> _promise;
-  VESC::PktId _wait_for_pkt_id = VESC::InvalidPktId;
 protected:
   VESCpp* _host;
 
   std::map<VESC::PktId, pkt_handler_cb_t> _pkt_handlers;
+
+private:
+  // Wait for a packet, received by the CAN RX thread. Only one thread can wait at a time
+  void startWait(VESC::PktId pkt_id);
+  void cancelWait();
+  // Blocks until the packet is received, returns nullptr on timeout
+  std::shared_ptr<VESC::Packet> endWait(const std::chrono::milliseconds& timeout);
+
+  // Protects the 2 members below
+  std::mutex _wait_mutex;
+  std::condition_variable _wait_cv;
+  // InvalidPktId: nobody is waiting
+  VESC::PktId _wait_for_pkt_id = VESC::InvalidPktId;
+  std::shared_ptr<VESC::Packet> _wait_reply;
 };
 
 /**
@@ -121,13 +128,23 @@ public:
   std::chrono::milliseconds msSinceLastCANPkt() const;
   std::chrono::milliseconds msSinceLastVESCkt() const;
 
-  std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> _devs;
+  // Devices are used from several threads (CAN RX, TX, user): only access them with these methods.
+  // Returned devices stay valid even if they are removed meanwhile by another thread.
+  [[nodiscard]] std::shared_ptr<VESCTarget> getDevice(VESC::BoardId board_id) const;
+  [[nodiscard]] std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> getDevices() const;
   protected:
+  void setDevice(VESC::BoardId board_id, std::shared_ptr<VESCTarget> dev);
+  void removeDevice(VESC::BoardId board_id);
+
   Comm* const _comm;
 
   static constexpr std::chrono::microseconds _tx_delay_us{10};
 
 private:
+  // Never hold the mutex while calling a device method or writing on CAN
+  mutable std::mutex _devs_mutex;
+  std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> _devs;
+
   Time::time_point _last_can_t, _last_pkt_t;
   // CAN
   // Callbacks

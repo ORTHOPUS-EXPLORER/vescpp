@@ -1,5 +1,7 @@
 #include "vescpp/vescpp.hpp"
 
+#include <utility>
+
 using namespace std::chrono_literals;
 
 namespace vescpp
@@ -35,25 +37,65 @@ bool VESCBase::pktAddHandler(VESC::PktId pkt_id, pkt_handler_cb_t cb, bool repla
 
 bool VESCBase::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<VESC::Packet>& pkt)
 {
-  bool r = false;
-  if(_wait_for_pkt_id == pkt->id)
-  {
-    spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
-    _wait_for_pkt_id = VESC::InvalidPktId;
-    _promise.set_value(pkt);
-    r = true;
-  }
-
-  if(_pkt_handlers.find(pkt->id) != _pkt_handlers.end())
+  // Run the handler registered for this type of packet, if any
+  const bool has_handler = _pkt_handlers.find(pkt->id) != _pkt_handlers.end();
+  bool result = false;
+  if(has_handler)
   {
     spdlog::trace("[VESCBase::pktProcess][{}<={}] Got a handler for Packet {}", id, src_id, pkt->id);
-    r = _pkt_handlers[pkt->id](comm, src_id, pkt);
+    result = _pkt_handlers[pkt->id](comm, src_id, pkt);
   }
 
-  //Only output debug if this is a Device
-  if(_host && !r)
+  // Give the packet to the thread waiting for this type of packet, if any. Must stay after the
+  // handler: the thread resumes immediately and may use what the handler stores (e.g. VESCTarget::_fw)
+  // Note: pkt->id is the packet type (e.g. COMM_FW_VERSION)
+  if(notifyWait(pkt->id, pkt))
+  {
+    spdlog::debug("[VESCBase::pktProcess][{}<={}] Wait is over for Packet {}", id, src_id, pkt->id);
+    // The handler has the last word on the result
+    if(!has_handler)
+      result = true;
+  }
+
+  // Nobody was interested in this packet (only debug log if this is a Device)
+  if(_host && !result)
     spdlog::debug("[VESCBase::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
-  return r;
+  return result;
+}
+
+
+void VESCBase::startWait(VESC::PktId pkt_id)
+{
+  std::lock_guard lock(_wait_mutex);
+  _wait_reply = nullptr;
+  _wait_for_pkt_id = pkt_id;
+}
+
+void VESCBase::cancelWait()
+{
+  std::lock_guard lock(_wait_mutex);
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  _wait_reply = nullptr;
+}
+
+std::shared_ptr<VESC::Packet> VESCBase::endWait(const std::chrono::milliseconds& timeout)
+{
+  std::unique_lock lock(_wait_mutex);
+  _wait_cv.wait_for(lock, timeout, [this]() { return _wait_reply != nullptr; });
+  // On timeout, stop waiting: a late reply is ignored (unless the same type is requested again)
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  return std::exchange(_wait_reply, nullptr);
+}
+
+bool VESCBase::notifyWait(VESC::PktId pkt_id, const std::shared_ptr<VESC::Packet>& pkt)
+{
+  std::lock_guard lock(_wait_mutex);
+  if(pkt_id == VESC::InvalidPktId || _wait_for_pkt_id != pkt_id)
+    return false;
+  _wait_for_pkt_id = VESC::InvalidPktId;
+  _wait_reply = pkt;
+  _wait_cv.notify_all();
+  return true;
 }
 
 
@@ -80,7 +122,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
   //_fw->hw_type_vesc = ::VESC::HW_TYPE_CUSTOM_MODULE;
   //_fw->custom_config = 0x00;
 
-  _comm->_vescpp[id] = this; // FIXME: Figure out if we keep this or not
+  _comm->registerVESCpp(id, this); // FIXME: Figure out if we keep this or not
 
   spdlog::debug("[{}] New VESCpp instance", id);
   if(auto* _can = dynamic_cast<comm::CAN*>(comm))
@@ -88,7 +130,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
     using namespace std::placeholders;
 
     /*
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id,
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id,
       [](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
       {
         _last_can_t = Time::now();
@@ -99,10 +141,10 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
     for(auto& pkt: _rx_pkts)
       pkt.state = PktState::Idle;
 
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id   , std::bind(&VESCpp::processShortBufferCB, this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id         , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id)    , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id) , std::bind(&VESCpp::processRXBufferCB,    this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id   , std::bind(&VESCpp::processShortBufferCB, this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id         , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id)    , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id) , std::bind(&VESCpp::processRXBufferCB,    this, _1, _2, _3, _4));
   }
 }
 
@@ -114,6 +156,31 @@ std::chrono::milliseconds VESCpp::msSinceLastCANPkt() const
 std::chrono::milliseconds VESCpp::msSinceLastVESCkt() const
 {
   return std::chrono::duration_cast<std::chrono::milliseconds>(Time::now() - _last_pkt_t);
+}
+
+std::shared_ptr<VESCTarget> VESCpp::getDevice(VESC::BoardId board_id) const
+{
+  std::lock_guard lock(_devs_mutex);
+  const auto it = _devs.find(board_id);
+  return it != _devs.end() ? it->second : nullptr;
+}
+
+std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> VESCpp::getDevices() const
+{
+  std::lock_guard lock(_devs_mutex);
+  return _devs;
+}
+
+void VESCpp::setDevice(VESC::BoardId board_id, std::shared_ptr<VESCTarget> dev)
+{
+  std::lock_guard lock(_devs_mutex);
+  _devs[board_id] = std::move(dev);
+}
+
+void VESCpp::removeDevice(VESC::BoardId board_id)
+{
+  std::lock_guard lock(_devs_mutex);
+  _devs.erase(board_id);
 }
 
 bool VESCpp::send(Comm* comm, const VESC::BoardId tgt_id, VESC::Packet& pkt, uint8_t send_cmd)
@@ -134,10 +201,10 @@ bool VESCpp::pktProcess(Comm* comm, const VESC::BoardId src_id, std::shared_ptr<
     return true;
   }
 
-  if(auto it = _devs.find(src_id); it != _devs.end())
+  if(auto dev = getDevice(src_id))
   {
     spdlog::trace("[VESCpp::pktProcess][{}<={}] Forward to device {}", id, src_id, pkt->id);
-    return it->second->pktProcess(comm, src_id, pkt);
+    return dev->pktProcess(comm, src_id, pkt);
   }
 
   spdlog::debug("[VESCpp::pktProcess][{}<={}] Unhandled Packet {}", id, src_id, pkt->id);
@@ -158,24 +225,16 @@ bool VESCpp::processRawPacket(Comm* comm, const VESC::BoardId src_id, const Data
   std::shared_ptr<VESC::Packet> pkt = std::move(VESC::packets::create(pkt_id, buff, start, len));
   if(!pkt)
   {
-    spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&_wait_for_pkt_id));
-    if(_wait_for_pkt_id == pkt_id)
+    // No Packet object could be created: either this type has no dedicated class or decoding failed.
+    // A thread may still be waiting for it (see waitFor()), so give it the raw undecoded data:
+    // it's up to that thread to interpret the bytes. If nobody is waiting, the packet is dropped.
+    const auto raw_pkt = std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1);
+    const auto dev = getDevice(src_id);
+    // Try a thread waiting on the host first, then on the device that sent the packet
+    if(notifyWait(pkt_id, raw_pkt) || (dev && dev->notifyWait(pkt_id, raw_pkt)))
     {
       spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
-      _wait_for_pkt_id = VESC::InvalidPktId;
-      _promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
       return true;
-    }
-    if(auto it = _devs.find(src_id); it != _devs.end())
-    {
-      spdlog::trace("[{}<={}] Waiting for ID {}/{}", id, src_id, _wait_for_pkt_id, fmt::ptr(&it->second->_wait_for_pkt_id));
-      if(it->second->_wait_for_pkt_id == pkt_id)
-      {
-        spdlog::trace("[VESCpp::processRawPacket][{}<={}] Wait is over for Packet {}", id, src_id, pkt_id);
-        it->second->_wait_for_pkt_id = VESC::InvalidPktId;
-        it->second->_promise.set_value(std::make_shared<VESC::RawPacket>(pkt_id, buff, start+1, len-1));
-        return true;
-      }
     }
     spdlog::debug("[{}<={}] Unknown packet with ID: {}", id, src_id, pkt_id);
     return false;
@@ -260,11 +319,11 @@ void VESCpp::scanCAN(std::chrono::milliseconds timeout_ms, std::function<void(VE
     return;
   spdlog::trace("[{}] Scan CAN bus for VESC boards", id);
   std::vector<std::pair<VESC::BoardId, VESC::HwTypeId>> out;
-  Time::time_point last_pong_time=Time::now();
+  std::atomic<Time::time_point> last_pong_time{Time::now()}; // Written from the CAN RX thread
   auto hdlr_id = can->addHandler((::VESC::CAN_PACKET_PONG<<8)|id,
     [this, &last_pong_time, &cb](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
     {
-      last_pong_time = Time::now();
+      last_pong_time.store(Time::now());
       spdlog::debug("[{}] Got CAN PONG: {:pn}", id, spdlog::to_hex(data, data+len));
       if(cb)
         cb((VESC::BoardId)(data[0]), (VESC::HwTypeId)(data[1]));
@@ -282,9 +341,10 @@ void VESCpp::scanCAN(std::chrono::milliseconds timeout_ms, std::function<void(VE
   }
   spdlog::trace("[{}] Done sending PINGs", id);
 
-  while (Time::now()-last_pong_time < timeout_ms)
+  while (Time::now()-last_pong_time.load() < timeout_ms)
     std::this_thread::sleep_for(1ms);
   spdlog::trace("[{}] Done scanning CAN bus for VESC boards", id);
+  // Once removed, the handler can't run anymore: safe to leave this scope (it uses local variables)
   can->removeHandler(hdlr_id);
 }
 

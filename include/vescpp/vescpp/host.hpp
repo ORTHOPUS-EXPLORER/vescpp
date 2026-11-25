@@ -24,56 +24,56 @@ public:
     VESC::BoardId board_id, VESC::HwTypeId type, bool check_firmware_version,
     std::chrono::milliseconds timeout_ms = std::chrono::milliseconds(200))
   {
+    std::shared_ptr<VESCTarget> dev;
     switch (type)
     {
-      // Note: it's MANDATORY that _devs[board_id] exists BEFORE the firmware version check 
-      // (see pktProcess in libs/orthopus_vesc/lib/vescpp/src/vescpp)
       case ::VESC::HW_TYPE_VESC:
-        _devs[board_id] = std::make_shared<VESCDrive>(board_id, this);
+        dev = std::make_shared<VESCDrive>(board_id, this);
         break;
       case ::VESC::HW_TYPE_CUSTOM_MODULE:
-        _devs[board_id] = std::make_shared<HwType>(board_id, this);
+        dev = std::make_shared<HwType>(board_id, this);
         break;
       default:
         spdlog::warn(
           "[{}] Unsupported Peer type {}/{} for Peer {}", id, type, ::VESC::HW_TYPE_s(type),
           board_id);
-        _devs[board_id] = std::make_shared<VESCTarget>(board_id, this);
+        dev = std::make_shared<VESCTarget>(board_id, this);
     }
+    // Note: it's MANDATORY that the device is registered BEFORE the firmware version check
+    // (see pktProcess in libs/orthopus_vesc/lib/vescpp/src/vescpp)
+    setDevice(board_id, dev);
 
     if (check_firmware_version)
     {
       // SendRequest for FW_VERSION
-      if (_devs[board_id]->request<VESC::packets::FwVersion>(timeout_ms) == nullptr)
+      if (dev->request<VESC::packets::FwVersion>(timeout_ms) == nullptr)
       {
         spdlog::warn(
           "[{}] VESC Peer {} did not reply to FwVersion request, target ignored", id, board_id);
-          // Note: As long as it's mandatory that _devs[board_id] exists before firmware version check, need to remove if not found
+          // Note: As long as it's mandatory that the device exists before firmware version check, need to remove if not found
           remove_peer(board_id);
         return nullptr;
       }
     }
     spdlog::debug("[{}] Add VESC Peer {}: {}", id, board_id, ::VESC::HW_TYPE_s(type));
 
-    return std::dynamic_pointer_cast<HwType>(_devs[board_id]);
+    return std::dynamic_pointer_cast<HwType>(dev);
   }
 
   void remove_peer(VESC::BoardId board_id)
   {
-    if (auto it = _devs.find(board_id); it != _devs.end()) _devs.erase(it);
+    removeDevice(board_id);
   }
 
   [[nodiscard]] const std::map<VESC::BoardId, std::shared_ptr<VESCTarget>> peers() const
   {
-    return _devs;
+    return getDevices();
   }
 
   template <class HwType = VESCTarget>
   std::shared_ptr<HwType> get_peer(VESC::BoardId board_id)
   {
-    if (auto it = _devs.find(board_id); it != _devs.end())
-      return std::dynamic_pointer_cast<HwType>(it->second);
-    return nullptr;
+    return std::dynamic_pointer_cast<HwType>(getDevice(board_id));
   }
 
   void scanCAN(

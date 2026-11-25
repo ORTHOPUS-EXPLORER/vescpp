@@ -9,6 +9,7 @@ namespace vescpp::VESC
   {
     public:
       Packet(PktId id, size_t len_min, size_t len_max=0);
+      virtual ~Packet() = default;
 
       bool encode(DataBuffer& buf, size_t start=0, size_t max_len=0);
       bool decode(const DataBuffer& buf, size_t start=0, size_t len=0);
