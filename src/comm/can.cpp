@@ -38,13 +38,17 @@ void CAN::canRXcb(const can_frame& frame)
   auto& can_data = frame.data;
   auto can_len = frame.can_dlc;
   bool handled = false;
-  for (const auto& [hdlr_id, hdlr_cb] : _can_handlers)
   {
-    //spdlog::debug("  CAN ID vs CAN Handler ID: {} vs {}", can_id, hdlr_id);
-    if (can_id != hdlr_id || !hdlr_cb) continue;
+    std::lock_guard lock(_can_handlers_mutex);
+    for (const auto& [_, hdlr] : _can_handlers)
+    {
+      const auto& [hdlr_can_id, hdlr_cb] = hdlr;
+      //spdlog::debug("  CAN ID vs CAN Handler ID: {} vs {}", can_id, hdlr_can_id);
+      if (can_id != hdlr_can_id || !hdlr_cb) continue;
 
-    hdlr_cb(this, can_id, can_data, can_len);
-    handled = true;
+      hdlr_cb(this, can_id, can_data, can_len);
+      handled = true;
+    }
   }
   if (!handled)
   {
@@ -66,16 +70,16 @@ void CAN::canRXcb(const can_frame& frame)
 
 size_t CAN::addHandler(const Id id, std::function<Handler> cb)
 {
-  _can_handlers.emplace_back(id, cb);
-  return _can_handlers.size() - 1;
+  std::lock_guard lock(_can_handlers_mutex);
+  const size_t handler_id = _next_handler_id++;
+  _can_handlers.emplace(handler_id, std::make_pair(id, std::move(cb)));
+  return handler_id;
 }
-bool CAN::removeHandler(size_t index)
+
+bool CAN::removeHandler(size_t handler_id)
 {
-  auto& hdlr = _can_handlers[index];
-  // FIXME: Fugly, better cleanup !
-  hdlr.first = 0xFFFF;
-  hdlr.second = nullptr;
-  return true;
+  std::lock_guard lock(_can_handlers_mutex);
+  return _can_handlers.erase(handler_id) > 0;
 }
 
 bool CAN::write(const can_frame& fr)

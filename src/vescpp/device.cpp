@@ -27,7 +27,7 @@ VESCDevice::VESCDevice(VESC::BoardId this_id, Comm* comm)
   {
     using namespace std::placeholders;
 
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PING<<8)|id,
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PING<<8)|id,
       [this](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
       {
         spdlog::trace("[{}] Got CAN_PACKET_PING                : {:pn}", id, spdlog::to_hex(data, data+len));

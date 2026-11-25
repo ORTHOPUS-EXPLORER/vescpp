@@ -94,7 +94,7 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
     using namespace std::placeholders;
 
     /*
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id,
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PONG<<8)| id,
       [](comm::CAN* can, const comm::CAN::Id can_id, const uint8_t data[8], const uint8_t len)
       {
         _last_can_t = Time::now();
@@ -105,10 +105,10 @@ VESCpp::VESCpp(VESC::BoardId this_id, Comm* comm)
     for(auto& pkt: _rx_pkts)
       pkt.state = PktState::Idle;
 
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id   , std::bind(&VESCpp::processShortBufferCB, this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id         , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id)    , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
-    _can->_can_handlers.emplace_back((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id) , std::bind(&VESCpp::processRXBufferCB,    this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_SHORT_BUFFER<<8)|id   , std::bind(&VESCpp::processShortBufferCB, this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER<<8)|id         , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_FILL_RX_BUFFER_LONG<<8|id)    , std::bind(&VESCpp::fillRXBufferCB,       this, _1, _2, _3, _4));
+    _can->addHandler((comm::CAN::Id)(::VESC::CAN_PACKET_PROCESS_RX_BUFFER<<8|this_id) , std::bind(&VESCpp::processRXBufferCB,    this, _1, _2, _3, _4));
   }
 }
 
